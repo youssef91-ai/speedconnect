@@ -61,10 +61,10 @@ export function Navbar() {
           className="nav-links-desktop"
         >
           {[
-            { label: "Features", href: "#features" },
-            { label: "Tools", href: "#tools" },
-            { label: "Reviews", href: "#reviews" },
-            { label: "FAQ", href: "#faq" },
+            { label: "Features", href: "/#features" },
+            { label: "Tools", href: "/tools" },
+            { label: "Blog", href: "/blog" },
+            { label: "FAQ", href: "/#faq" },
           ].map(({ label, href }) => (
             <li key={label}>
               <a
@@ -86,7 +86,7 @@ export function Navbar() {
 
         {/* CTA */}
         <a
-          href="#hero"
+          href="/"
           style={{
             padding: "8px 18px", borderRadius: 100,
             background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",

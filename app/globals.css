@@ -1,6 +1,5 @@
-@import "tailwindcss";
-
 @import url("https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap");
+@import "tailwindcss";
 
 :root {
   --bg: #04060f;
@@ -308,3 +307,19 @@ body {
 .reveal-delay-1 { transition-delay: 0.1s; }
 .reveal-delay-2 { transition-delay: 0.2s; }
 .reveal-delay-3 { transition-delay: 0.3s; }
+
+/* ── HOVER UTILITIES (used by server components that can't use onMouse*) ── */
+.hover-lift {
+  transition: border-color 0.25s, transform 0.25s;
+}
+.hover-lift:hover {
+  border-color: rgba(255, 255, 255, 0.13) !important;
+  transform: translateY(-2px);
+}
+.hover-lift-sm:hover {
+  border-color: rgba(255, 255, 255, 0.13) !important;
+  transform: translateY(-2px);
+}
+.hover-border:hover {
+  border-color: rgba(255, 255, 255, 0.13) !important;
+}

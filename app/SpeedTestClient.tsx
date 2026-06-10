@@ -795,8 +795,8 @@ function ToolsSection() {
     { icon: "📡", name: "Ping Test", description: "Measure real-time latency to global servers. Spot packet loss, routing anomalies, and instability live.", href: "/tools/ping-test" },
     { icon: "🔍", name: "DNS Lookup", description: "Query A, AAAA, MX, CNAME, TXT and NS records. Verify propagation and debug DNS misconfigurations.", href: "/tools/dns-lookup" },
     { icon: "🗺️", name: "IP Intelligence", description: "Deep-dive any IP — geolocation, ASN, threat intel, VPN/proxy detection, and reverse DNS in one view.", href: "/tools/ip-lookup" },
-    { icon: "🛡️", name: "VPN Detector", description: "Detect whether your connection routes through a VPN, datacenter proxy, or Tor exit node with our heuristic engine.", href: "#" },
-    { icon: "📈", name: "Speed History", description: "Track your speeds over days and weeks. Export CSV data or share annotated charts with your ISP support.", href: "#" },
+    { icon: "🛡️", name: "VPN Detector", description: "Detect whether your connection routes through a VPN, datacenter proxy, or Tor exit node with our heuristic engine.", href: "/tools" },
+    { icon: "📈", name: "Speed History", description: "Track your speeds over days and weeks. Export CSV data or share annotated charts with your ISP support.", href: "/tools" },
   ];
 
   return (
