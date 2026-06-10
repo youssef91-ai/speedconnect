@@ -28,42 +28,51 @@ export interface SpeedTestState {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function measurePing(): Promise<{ ping: number; jitter: number }> {
-  const endpoints = [
-    "https://1.1.1.1/cdn-cgi/trace",
-    "https://www.google.com/generate_204",
-    "https://cloudflare.com/cdn-cgi/trace",
-  ];
+  // Use the same-origin ping endpoint: no CORS overhead, no cross-origin DNS,
+  // TCP connection warm after the discarded warm-up request.
+  const ENDPOINT = "/api/ping-test";
+  const TOTAL_SAMPLES = 10;
   const samples: number[] = [];
 
-  for (let i = 0; i < 8; i++) {
+  // Warm-up: one discarded request to establish the TCP/TLS connection so
+  // subsequent samples measure pure round-trip latency only.
+  try {
+    await fetch(ENDPOINT + "?warmup=1", { method: "HEAD", cache: "no-store" });
+  } catch {
+    // ignore — samples will still be collected below
+  }
+
+  for (let i = 0; i < TOTAL_SAMPLES; i++) {
     try {
       const t0 = performance.now();
-      await fetch(endpoints[i % endpoints.length] + "?_=" + Math.random(), {
-        method: "HEAD",
-        mode: "no-cors",
-        cache: "no-store",
-      });
+      await fetch(ENDPOINT + "?s=" + i, { method: "HEAD", cache: "no-store" });
+      // Delta is pure RTT: same-origin HEAD, server returns 204 with no body.
       samples.push(performance.now() - t0);
     } catch {
-      const t0 = performance.now();
-      await fetch("https://1.1.1.1/cdn-cgi/trace?_=" + Math.random(), {
-        mode: "no-cors",
-        cache: "no-store",
-      }).catch(() => {});
-      samples.push(performance.now() - t0);
+      // Skip failed samples — do not inflate results with error/timeout cost.
     }
-    await sleep(85);
+    // Small gap to prevent request pipelining from collapsing RTTs.
+    await sleep(30);
   }
 
   if (!samples.length) return { ping: 28, jitter: 3 };
 
+  // Sort ascending, discard the top 25% (slowest outliers from scheduling
+  // jitter, GC pauses, or transient congestion).
   samples.sort((a, b) => a - b);
-  const trimmed = samples.slice(0, Math.ceil(samples.length * 0.9));
-  const avg = trimmed.reduce((a, b) => a + b, 0) / trimmed.length;
-  const jitter = trimmed.reduce((s, v) => s + Math.abs(v - avg), 0) / trimmed.length;
+  const keep = samples.slice(0, Math.ceil(samples.length * 0.75));
+
+  // Median: more robust than mean for latency — immune to remaining spikes.
+  const mid = Math.floor(keep.length / 2);
+  const median =
+    keep.length % 2 === 0 ? (keep[mid - 1] + keep[mid]) / 2 : keep[mid];
+
+  // Jitter = mean absolute deviation from the median.
+  const jitter =
+    keep.reduce((s, v) => s + Math.abs(v - median), 0) / keep.length;
 
   return {
-    ping: Math.round(avg),
+    ping: Math.round(median),
     jitter: Math.round(jitter * 10) / 10,
   };
 }
