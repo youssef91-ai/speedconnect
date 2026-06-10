@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
 
 export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 50);
@@ -87,11 +90,28 @@ export function Navbar() {
         {/* CTA */}
         <button
           onClick={() => {
-            const el = document.getElementById("speed-test");
-            if (el) {
-              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            if (pathname === "/") {
+              // Already on homepage — scroll directly to the card.
+              const el = document.getElementById("speed-test");
+              if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+              } else {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }
             } else {
-              window.scrollTo({ top: 0, behavior: "smooth" });
+              // On another page — navigate home, then scroll after the DOM loads.
+              router.push("/");
+              // scrollIntoView after navigation: poll until the element appears.
+              let attempts = 0;
+              const poll = setInterval(() => {
+                const el = document.getElementById("speed-test");
+                if (el) {
+                  clearInterval(poll);
+                  el.scrollIntoView({ behavior: "smooth", block: "center" });
+                } else if (++attempts > 40) {
+                  clearInterval(poll);
+                }
+              }, 100);
             }
           }}
           style={{
