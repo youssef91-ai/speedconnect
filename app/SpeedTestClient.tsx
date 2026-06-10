@@ -247,16 +247,16 @@ function ResultsDashboard({
   const useCases = getUseCases(result.download, result.upload, result.ping, result.jitter);
 
   useEffect(() => {
-    fetch("https://ipapi.co/json/")
+    fetch("/api/ip-info")
       .then((r) => r.json())
       .then((d) =>
         setIpInfo({
           ip: d.ip || "—",
-          loc: d.city ? `${d.city}, ${d.country_code}` : "—",
-          isp: (d.org || "—").replace(/^AS\d+\s+/, "").slice(0, 20),
+          loc: d.city ? `${d.city}, ${d.country}` : "—",
+          isp: (d.org || "—").replace(/^AS\d+\s+/, "").slice(0, 22),
         })
       )
-      .catch(() => setIpInfo({ ip: "Private", loc: "—", isp: "—" }));
+      .catch(() => setIpInfo({ ip: "—", loc: "—", isp: "—" }));
   }, []);
 
   return (
