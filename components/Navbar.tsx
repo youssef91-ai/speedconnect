@@ -91,23 +91,24 @@ export function Navbar() {
         <button
           onClick={() => {
             if (pathname === "/") {
-              // Already on homepage — scroll directly to the card.
+              // Already on homepage — scroll the card into view then start the test.
               const el = document.getElementById("speed-test");
               if (el) {
                 el.scrollIntoView({ behavior: "smooth", block: "center" });
-              } else {
-                window.scrollTo({ top: 0, behavior: "smooth" });
               }
+              // Fire the test regardless — if already running this is a no-op via the hook's toggle.
+              window.__speedTestRun?.();
             } else {
-              // On another page — navigate home, then scroll after the DOM loads.
+              // On another page — navigate home, then scroll + start after DOM loads.
               router.push("/");
-              // scrollIntoView after navigation: poll until the element appears.
               let attempts = 0;
               const poll = setInterval(() => {
                 const el = document.getElementById("speed-test");
                 if (el) {
                   clearInterval(poll);
                   el.scrollIntoView({ behavior: "smooth", block: "center" });
+                  // Small delay so the scroll animation begins before the test UI changes.
+                  setTimeout(() => window.__speedTestRun?.(), 400);
                 } else if (++attempts > 40) {
                   clearInterval(poll);
                 }

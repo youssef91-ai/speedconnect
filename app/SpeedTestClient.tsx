@@ -980,10 +980,23 @@ function CtaBanner() {
 }
 
 // ─── HERO / SPEED CARD ───────────────────────────────────────────────────────
+// Extend window so the Navbar button can trigger the test from outside this component.
+declare global {
+  interface Window {
+    __speedTestRun?: () => void;
+  }
+}
+
 export function SpeedTestClient() {
   const { state, run } = useSpeedTest();
   const [history, setHistory] = useState<Array<{ dl: number; ul: number; ts: number }>>([]);
   const revealRef = useRef<HTMLDivElement[]>([]);
+
+  // Register run() on window so Navbar can invoke it cross-component.
+  useEffect(() => {
+    window.__speedTestRun = run;
+    return () => { delete window.__speedTestRun; };
+  }, [run]);
 
   // Push to history when done
   useEffect(() => {
