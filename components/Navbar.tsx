@@ -85,8 +85,15 @@ export function Navbar() {
         </ul>
 
         {/* CTA */}
-        <a
-          href="/"
+        <button
+          onClick={() => {
+            const el = document.getElementById("speed-test");
+            if (el) {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            } else {
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }
+          }}
           style={{
             padding: "8px 18px", borderRadius: 100,
             background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
@@ -95,16 +102,16 @@ export function Navbar() {
             transition: "opacity .2s, transform .2s",
           }}
           onMouseEnter={(e) => {
-            (e.currentTarget as HTMLAnchorElement).style.opacity = "0.88";
-            (e.currentTarget as HTMLAnchorElement).style.transform = "scale(1.02)";
+            (e.currentTarget as HTMLButtonElement).style.opacity = "0.88";
+            (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.02)";
           }}
           onMouseLeave={(e) => {
-            (e.currentTarget as HTMLAnchorElement).style.opacity = "1";
-            (e.currentTarget as HTMLAnchorElement).style.transform = "scale(1)";
+            (e.currentTarget as HTMLButtonElement).style.opacity = "1";
+            (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
           }}
         >
           Run Test ↗
-        </a>
+        </button>
       </div>
 
       <style>{`

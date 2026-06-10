@@ -1068,6 +1068,7 @@ export function SpeedTestClient() {
 
         {/* ── SPEED CARD ── */}
         <div
+          id="speed-test"
           style={{
             width: "100%", maxWidth: 660,
             background: "rgba(255,255,255,0.028)",
