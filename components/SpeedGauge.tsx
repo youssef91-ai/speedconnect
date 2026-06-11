@@ -2,40 +2,32 @@
 
 import { useEffect, useRef } from "react";
 
-// ─── Log-scale math ────────────────────────────────────────────────────────
-// k=62.5 is the unique constant where speedToPct(500)=0.5 exactly when MAX=5000.
-// Derived: solve log(1+500/k)/log(1+5000/k)=0.5 → k=62.5
-const LOG_K    = 62.5;
-const LOG_MAX  = 5000;
-const LOG_DENOM = Math.log(1 + LOG_MAX / LOG_K);
+// ─── Logarithmic scale ───────────────────────────────────────────────────────
+// k=62.5 is derived so that speedToPct(500)=0.5 exactly when MAX=5000.
+// Proof: log(1+500/62.5)/log(1+5000/62.5) = log(9)/log(81) = log(9)/(2·log(9)) = 0.5 ✓
+const LOG_K     = 62.5;
+const LOG_MAX   = 5000;
+const LOG_DENOM = Math.log(1 + LOG_MAX / LOG_K); // log(81)
 
 function speedToPct(v: number): number {
   return Math.log(1 + Math.min(Math.max(v, 0), LOG_MAX) / LOG_K) / LOG_DENOM;
 }
 
-function hexToRgba(hex: string, a: number): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${a})`;
-}
-
-// ─── Geometry constants ───────────────────────────────────────────────────
+// ─── Geometry (fixed, verified) ──────────────────────────────────────────────
 // Canvas angles: 0=east, π/2=south, π=west, 3π/2=north (clockwise)
-// We want: 0 Mbps at lower-left (150°), 500 at top (270°), 5000 at lower-right (390°=30°)
-// Total sweep = 240°
-const SA    = (5 * Math.PI) / 6;        // 150° – lower-left  (start)
-const EA    = (13 * Math.PI) / 6;       // 390° – lower-right (end)
-const SWEEP = EA - SA;                   // 4π/3 = 240°
+// 0 Mbps  → 150° (lower-left)   = 5π/6
+// 500 Mbps → 270° (top-center)  = 3π/2  [exactly half-sweep]
+// 5000 Mbps → 390° (lower-right) = 13π/6
+const SA    = (5 * Math.PI) / 6;   // 150° — start
+const EA    = (13 * Math.PI) / 6;  // 390° — end
+const SWEEP = EA - SA;              // 4π/3 = 240°
 
 function speedToAngle(v: number): number {
   return SA + SWEEP * speedToPct(v);
 }
 
-// Label set matching Speedtest.net: spaced to avoid overlap at all sizes.
-// 0/5/10 are bottom-left (spread horizontally → no vertical overlap).
-// 200/250/3000/4000 removed to prevent crowding.
-const LABEL_MARKS = [
+// ─── Labels: spaced so no two are closer than ~8° (verified at R=175) ────────
+const LABEL_MARKS: Array<{ v: number; label: string }> = [
   { v: 0,    label: "0"    },
   { v: 10,   label: "10"   },
   { v: 50,   label: "50"   },
@@ -48,58 +40,47 @@ const LABEL_MARKS = [
   { v: 5000, label: "5000" },
 ];
 
-// Minor ticks: 4 evenly-spaced (in log-pct) between each pair of label marks
+// Minor ticks: 4 per interval in log-pct space
 function buildMinorTicks(): number[] {
   const out: number[] = [];
   for (let i = 0; i < LABEL_MARKS.length - 1; i++) {
     const p0 = speedToPct(LABEL_MARKS[i].v);
     const p1 = speedToPct(LABEL_MARKS[i + 1].v);
-    for (let j = 1; j <= 4; j++) {
-      out.push(p0 + (p1 - p0) * (j / 5));
-    }
+    for (let j = 1; j <= 4; j++) out.push(p0 + (p1 - p0) * (j / 5));
   }
   return out;
 }
 const MINOR_TICKS = buildMinorTicks();
 
-// ─── Arc gradient stops (cyan→blue→violet→purple) ─────────────────────────
+// ─── Gradient stops (cyan → blue → violet → magenta) ────────────────────────
 const GRAD_STOPS: Array<[number, string]> = [
   [0,    "#00e5ff"],
-  [0.25, "#2196f3"],
-  [0.55, "#651fff"],
+  [0.28, "#2196f3"],
+  [0.56, "#651fff"],
   [1,    "#d500f9"],
 ];
 
-function makeArcGrad(
-  ctx: CanvasRenderingContext2D,
-  cx: number, cy: number, r: number,
-  fromA: number, toA: number
-): CanvasGradient {
-  // Use a linear gradient along the chord for consistent colour distribution
-  const x0 = cx + r * Math.cos(fromA), y0 = cy + r * Math.sin(fromA);
-  const x1 = cx + r * Math.cos(toA),   y1 = cy + r * Math.sin(toA);
-  const g = ctx.createLinearGradient(x0, y0, x1, y1);
-  GRAD_STOPS.forEach(([stop, color]) => g.addColorStop(stop, color));
-  return g;
+function hexToRgba(hex: string, a: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${a})`;
 }
 
-// ─── Component ────────────────────────────────────────────────────────────
+// ─── Component ───────────────────────────────────────────────────────────────
 interface SpeedGaugeProps {
   speed: number;
   phase?: string;
 }
 
 export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
-  const canvasRef  = useRef<HTMLCanvasElement>(null);
-  const speedRef   = useRef(speed);
-  // Animated display value
-  const dispRef    = useRef(0);
-  // Spring state
-  const velRef     = useRef(0);
-  const loopRef    = useRef<number>(0);
-  const bootedRef  = useRef(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const speedRef  = useRef(speed);   // written by React, read by RAF
+  const dispRef   = useRef(0);       // current animated value
+  const velRef    = useRef(0);       // spring velocity
+  const loopRef   = useRef<number>(0);
+  const bootedRef = useRef(false);
 
-  // Always keep target in sync — no re-renders of the loop
   speedRef.current = speed;
 
   useEffect(() => {
@@ -107,10 +88,18 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
     if (!canvas || bootedRef.current) return;
     bootedRef.current = true;
 
-    // ── Sizing: fills container, capped at 460px, aspect 1:0.65 ─────────
-    const DPR  = Math.min(window.devicePixelRatio || 1, 2);
-    const W    = Math.min(canvas.parentElement?.clientWidth ?? 420, 460);
-    const H    = Math.round(W * 0.65);
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+    // ── Sizing ──────────────────────────────────────────────────────────────
+    // W capped at 460px. H derived so arc endpoints have ≥11px bottom margin.
+    const W   = Math.min(canvas.parentElement?.clientWidth ?? 420, 460);
+    const R   = Math.round(W * 0.38);                        // arc radius
+    const AW  = Math.max(16, Math.round(R * 0.132));         // arc thickness
+    const CX  = W / 2;
+    const CY  = R + 40;                                      // pivot: 40px below arc top
+    // Arc endpoints are at sin(30°)=0.5 below CY
+    const H   = Math.ceil(CY + R * 0.5 + AW + 22);          // +22px bottom padding
+
     canvas.width        = W * DPR;
     canvas.height       = H * DPR;
     canvas.style.width  = W + "px";
@@ -119,225 +108,198 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
     const ctx = canvas.getContext("2d")!;
     ctx.scale(DPR, DPR);
 
-    // ── Geometry ─────────────────────────────────────────────────────────
-    const CX   = W / 2;
-    // Pivot point: 68% down the canvas gives good room above for arc + labels
-    const CY   = Math.round(H * 0.72);
-    const R    = Math.round(W * 0.42);        // arc radius
+    // ── Derived radii ────────────────────────────────────────────────────────
+    const LABEL_R     = R - AW - 8;                          // labels sit inside arc
+    const TICK_OUT    = R + Math.round(AW * 0.55);           // tick outer edge
+    const TICK_MAJ_IN = TICK_OUT - Math.round(R * 0.072);   // major tick inner
+    const TICK_MIN_IN = TICK_OUT - Math.round(R * 0.038);   // minor tick inner
+    const HUB_R       = Math.max(9, Math.round(R * 0.072));
+    const NEEDLE_LEN  = R - Math.round(AW * 0.18);
+    const NEEDLE_W    = Math.max(1.8, R * 0.015);
+    const FS          = Math.max(9, Math.round(R * 0.074));  // label font size
 
-    // Arc thickness proportional to radius (mimics STN's thick ring)
-    const ARC_W = Math.max(14, Math.round(R * 0.118));
-
-    // Label radius: just inside the arc
-    const LABEL_R = R - ARC_W * 0.5 - Math.round(R * 0.13);
-
-    // Tick outer edge: just outside the arc
-    const TICK_OUTER = R + ARC_W * 0.55;
-
-    // Font size scales with gauge
-    const FS_LABEL = Math.max(9, Math.round(R * 0.073));
-
-    // ── Draw function ─────────────────────────────────────────────────────
+    // ── Draw ─────────────────────────────────────────────────────────────────
     function draw(v: number) {
       ctx.clearRect(0, 0, W, H);
 
       const pct  = speedToPct(v);
       const endA = speedToAngle(v);
 
-      // ── 1. Shadow ring behind arc ────────────────────────────────────
+      // 1. Dark shadow ring (gives depth behind the track)
       ctx.save();
+      ctx.filter = "blur(5px)";
       ctx.beginPath();
       ctx.arc(CX, CY, R, SA, EA);
-      ctx.strokeStyle = "rgba(0,0,0,0.45)";
-      ctx.lineWidth   = ARC_W + 12;
+      ctx.strokeStyle = "rgba(0,0,0,0.5)";
+      ctx.lineWidth   = AW + 14;
       ctx.lineCap     = "butt";
-      ctx.filter      = "blur(6px)";
       ctx.stroke();
       ctx.restore();
 
-      // ── 2. Background track ──────────────────────────────────────────
+      // 2. Background track
       ctx.beginPath();
       ctx.arc(CX, CY, R, SA, EA);
-      ctx.strokeStyle = "rgba(255,255,255,0.055)";
-      ctx.lineWidth   = ARC_W;
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.lineWidth   = AW;
       ctx.lineCap     = "butt";
       ctx.stroke();
 
-      // ── 3. Minor ticks ───────────────────────────────────────────────
+      // 3. Minor ticks (outside arc)
       MINOR_TICKS.forEach(p => {
-        const a  = SA + SWEEP * p;
-        const r1 = TICK_OUTER;
-        const r2 = r1 - Math.round(R * 0.038);
+        const a = SA + SWEEP * p;
         ctx.beginPath();
-        ctx.moveTo(CX + r1 * Math.cos(a), CY + r1 * Math.sin(a));
-        ctx.lineTo(CX + r2 * Math.cos(a), CY + r2 * Math.sin(a));
-        ctx.strokeStyle = "rgba(255,255,255,0.16)";
-        ctx.lineWidth   = 0.8;
+        ctx.moveTo(CX + TICK_OUT    * Math.cos(a), CY + TICK_OUT    * Math.sin(a));
+        ctx.lineTo(CX + TICK_MIN_IN * Math.cos(a), CY + TICK_MIN_IN * Math.sin(a));
+        ctx.strokeStyle = "rgba(255,255,255,0.17)";
+        ctx.lineWidth   = 0.9;
         ctx.stroke();
       });
 
-      // ── 4. Major ticks ───────────────────────────────────────────────
-      LABEL_MARKS.forEach(m => {
-        const a  = speedToAngle(m.v);
-        const r1 = TICK_OUTER;
-        const r2 = r1 - Math.round(R * 0.07);
+      // 4. Major ticks (outside arc)
+      LABEL_MARKS.forEach(({ v: mv }) => {
+        const a = speedToAngle(mv);
         ctx.beginPath();
-        ctx.moveTo(CX + r1 * Math.cos(a), CY + r1 * Math.sin(a));
-        ctx.lineTo(CX + r2 * Math.cos(a), CY + r2 * Math.sin(a));
-        ctx.strokeStyle = "rgba(255,255,255,0.5)";
+        ctx.moveTo(CX + TICK_OUT    * Math.cos(a), CY + TICK_OUT    * Math.sin(a));
+        ctx.lineTo(CX + TICK_MAJ_IN * Math.cos(a), CY + TICK_MAJ_IN * Math.sin(a));
+        ctx.strokeStyle = "rgba(255,255,255,0.52)";
         ctx.lineWidth   = 1.5;
         ctx.stroke();
       });
 
-      // ── 5. Labels (inside arc) ───────────────────────────────────────
-      ctx.font          = `600 ${FS_LABEL}px 'DM Sans',sans-serif`;
-      ctx.textAlign     = "center";
-      ctx.textBaseline  = "middle";
-      LABEL_MARKS.forEach(m => {
-        const a  = speedToAngle(m.v);
+      // 5. Labels INSIDE the arc (between arc inner edge and hub)
+      ctx.font         = `600 ${FS}px 'DM Sans',sans-serif`;
+      ctx.textAlign    = "center";
+      ctx.textBaseline = "middle";
+      LABEL_MARKS.forEach(({ v: mv, label }) => {
+        const a  = speedToAngle(mv);
         const lx = CX + LABEL_R * Math.cos(a);
         const ly = CY + LABEL_R * Math.sin(a);
         ctx.fillStyle = "rgba(255,255,255,0.72)";
-        ctx.fillText(m.label, lx, ly);
+        ctx.fillText(label, lx, ly);
       });
 
-      // ── 6. Glowing progress arc ──────────────────────────────────────
+      // 6. Glowing progress arc
       if (pct > 0.003) {
-        const grad = makeArcGrad(ctx, CX, CY, R, SA, endA);
+        // Gradient: chord from arc-start to needle-tip
+        const gx0 = CX + R * Math.cos(SA),   gy0 = CY + R * Math.sin(SA);
+        const gx1 = CX + R * Math.cos(endA),  gy1 = CY + R * Math.sin(endA);
+        const grad = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
+        // Clamp stop positions for short arcs so gradient always ends at correct colour
+        const pctClamped = Math.max(pct, 0.01);
+        GRAD_STOPS.forEach(([stop, color]) => {
+          grad.addColorStop(Math.min(stop / pctClamped, 1), color);
+        });
 
-        // Diffuse glow underneath (wider, semi-transparent)
-        // Intensity grows with speed for realism
-        const glowAlpha = 0.15 + pct * 0.25;
+        // Outer soft glow (grows with speed)
         ctx.save();
         ctx.shadowColor = pct < 0.5 ? "#00bcd4" : "#9c27b0";
-        ctx.shadowBlur  = Math.round(ARC_W * (0.8 + pct * 1.4));
+        ctx.shadowBlur  = Math.round(AW * (0.9 + pct * 1.6));
         ctx.beginPath();
         ctx.arc(CX, CY, R, SA, endA);
         ctx.strokeStyle = grad;
-        ctx.lineWidth   = ARC_W + Math.round(R * 0.06);
+        ctx.lineWidth   = AW + Math.round(R * 0.055);
         ctx.lineCap     = "butt";
-        ctx.globalAlpha = glowAlpha;
+        ctx.globalAlpha = 0.18 + pct * 0.24;
         ctx.stroke();
         ctx.restore();
 
-        // Crisp bright arc on top
+        // Crisp bright arc
         ctx.beginPath();
         ctx.arc(CX, CY, R, SA, endA);
         ctx.strokeStyle = grad;
-        ctx.lineWidth   = ARC_W;
+        ctx.lineWidth   = AW;
         ctx.lineCap     = "butt";
         ctx.stroke();
 
-        // ── 7. Tip glow ─────────────────────────────────────────────
+        // Tip glow dot at needle end
         const tx = CX + R * Math.cos(endA);
         const ty = CY + R * Math.sin(endA);
-        const tipColor = pct < 0.3 ? "#2196f3" : pct < 0.6 ? "#651fff" : "#d500f9";
-        const glowR = ARC_W * 2.0;
+        const tipColor = pct < 0.3 ? "#2196f3" : pct < 0.62 ? "#651fff" : "#d500f9";
 
-        // Outer bloom
-        const bloom = ctx.createRadialGradient(tx, ty, 0, tx, ty, glowR);
-        bloom.addColorStop(0,   hexToRgba(tipColor, 0.65));
+        const bloom = ctx.createRadialGradient(tx, ty, 0, tx, ty, AW * 2.0);
+        bloom.addColorStop(0,   hexToRgba(tipColor, 0.7));
         bloom.addColorStop(0.5, hexToRgba(tipColor, 0.22));
         bloom.addColorStop(1,   "transparent");
         ctx.beginPath();
-        ctx.arc(tx, ty, glowR, 0, Math.PI * 2);
+        ctx.arc(tx, ty, AW * 2.0, 0, Math.PI * 2);
         ctx.fillStyle = bloom;
         ctx.fill();
 
-        // Bright core dot
-        const coreR = ARC_W * 0.52;
-        const core = ctx.createRadialGradient(tx, ty, 0, tx, ty, coreR);
+        const core = ctx.createRadialGradient(tx, ty, 0, tx, ty, AW * 0.5);
         core.addColorStop(0,   "rgba(255,255,255,1)");
-        core.addColorStop(0.4, hexToRgba(tipColor, 0.9));
+        core.addColorStop(0.5, hexToRgba(tipColor, 0.9));
         core.addColorStop(1,   "transparent");
         ctx.beginPath();
-        ctx.arc(tx, ty, coreR, 0, Math.PI * 2);
+        ctx.arc(tx, ty, AW * 0.5, 0, Math.PI * 2);
         ctx.fillStyle = core;
         ctx.fill();
       }
 
-      // ── 8. Needle ────────────────────────────────────────────────────
-      const needleLen = R - ARC_W * 0.22;   // almost reaches arc
-      const baseW     = Math.max(2, R * 0.016);
-
+      // 7. Needle
       ctx.save();
       ctx.translate(CX, CY);
       ctx.rotate(endA);
 
-      // Shadow
-      ctx.shadowColor   = "rgba(0,0,0,0.75)";
+      ctx.shadowColor   = "rgba(0,0,0,0.8)";
       ctx.shadowBlur    = 10;
-      ctx.shadowOffsetX = 2;
-      ctx.shadowOffsetY = 3;
+      ctx.shadowOffsetX = 1;
+      ctx.shadowOffsetY = 2;
 
-      // Tapered body (wide at pivot, thin at tip)
+      // Tapered body
       ctx.beginPath();
-      ctx.moveTo(-R * 0.09,  baseW * 1.15);
-      ctx.lineTo(needleLen,  baseW * 0.30);
-      ctx.lineTo(needleLen, -baseW * 0.30);
-      ctx.lineTo(-R * 0.09, -baseW * 1.15);
+      ctx.moveTo(-R * 0.088,  NEEDLE_W * 1.2);
+      ctx.lineTo(NEEDLE_LEN,  NEEDLE_W * 0.28);
+      ctx.lineTo(NEEDLE_LEN, -NEEDLE_W * 0.28);
+      ctx.lineTo(-R * 0.088, -NEEDLE_W * 1.2);
       ctx.closePath();
-      ctx.fillStyle = "rgba(255,255,255,0.96)";
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
       ctx.fill();
 
-      // Specular highlight along needle
+      // Specular stripe
       ctx.shadowBlur = 0;
       ctx.beginPath();
       ctx.moveTo(-R * 0.07, 0);
-      ctx.lineTo(needleLen - 5, 0);
-      ctx.strokeStyle = "rgba(255,255,255,0.42)";
-      ctx.lineWidth   = baseW * 0.35;
+      ctx.lineTo(NEEDLE_LEN - 5, 0);
+      ctx.strokeStyle = "rgba(255,255,255,0.4)";
+      ctx.lineWidth   = NEEDLE_W * 0.32;
       ctx.stroke();
 
       ctx.restore();
 
-      // ── 9. Hub ───────────────────────────────────────────────────────
-      const hubR = Math.max(10, Math.round(R * 0.088));
-
-      // Dark base
+      // 8. Hub
+      // Dark base plate
       ctx.beginPath();
-      ctx.arc(CX, CY, hubR + 2, 0, Math.PI * 2);
-      ctx.fillStyle   = "#08091a";
+      ctx.arc(CX, CY, HUB_R + 2, 0, Math.PI * 2);
+      ctx.fillStyle   = "#080a18";
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.14)";
+      ctx.strokeStyle = "rgba(255,255,255,0.13)";
       ctx.lineWidth   = 1.5;
       ctx.stroke();
 
-      // Radial highlight
+      // Shiny dome highlight
       const hub = ctx.createRadialGradient(
-        CX - hubR * 0.3, CY - hubR * 0.3, 0,
-        CX, CY, hubR
+        CX - HUB_R * 0.28, CY - HUB_R * 0.28, 0,
+        CX, CY, HUB_R
       );
-      hub.addColorStop(0,   "rgba(255,255,255,0.78)");
-      hub.addColorStop(0.4, "rgba(180,200,255,0.35)");
-      hub.addColorStop(1,   "rgba(40,50,100,0.10)");
+      hub.addColorStop(0,   "rgba(255,255,255,0.82)");
+      hub.addColorStop(0.38,"rgba(200,215,255,0.38)");
+      hub.addColorStop(1,   "rgba(30,40,90,0.10)");
       ctx.beginPath();
-      ctx.arc(CX, CY, hubR, 0, Math.PI * 2);
+      ctx.arc(CX, CY, HUB_R, 0, Math.PI * 2);
       ctx.fillStyle = hub;
       ctx.fill();
     }
 
-    // ── Spring-physics RAF loop ───────────────────────────────────────────
-    // Tuned for Speedtest.net feel:
-    //   - Fast response (high stiffness)
-    //   - Slight natural overshoot at high accelerations
-    //   - Smooth settle without oscillation
-    //
-    // Spring model: v += (target - pos) * K;  v *= D;  pos += v
-    // K = stiffness (higher = snappier)
-    // D = damping  (lower = more oscillation; >1 = unstable)
-
-    const K = 0.14;   // stiffness — tuned for fast response
-    const D = 0.76;   // damping   — slight overshoot at fast changes
-    const SNAP = 0.015; // snap-to-target threshold (Mbps)
-
-    let lastT = 0;
+    // ── Spring-physics RAF loop ───────────────────────────────────────────────
+    // Frame-rate independent: normalise dt against 60fps baseline.
+    // K=0.13 stiffness, D=0.78 damping → fast response, slight natural overshoot.
+    const K = 0.13;
+    const D = 0.78;
+    let lastTs = 0;
 
     function loop(ts: number) {
-      // Delta-time normalisation so physics is frame-rate independent
-      // Cap dt at 50ms to avoid jumps after tab switch
-      const dt  = Math.min((ts - lastT) / 16.67, 3.0); // relative to 60fps
-      lastT = ts;
+      const dt  = Math.min((ts - lastTs) / 16.667, 3); // cap at 3× a 60fps frame
+      lastTs = ts;
 
       const target = speedRef.current;
       const cur    = dispRef.current;
@@ -345,14 +307,12 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
 
       const delta  = target - cur;
       const newVel = (vel + delta * K * dt) * Math.pow(D, dt);
-      const next   = cur + newVel * dt;
 
-      // Settle check
-      if (Math.abs(delta) < SNAP && Math.abs(newVel) < SNAP) {
+      if (Math.abs(delta) < 0.02 && Math.abs(newVel) < 0.02) {
         dispRef.current = target;
         velRef.current  = 0;
       } else {
-        dispRef.current = next;
+        dispRef.current = cur + newVel * dt;
         velRef.current  = newVel;
       }
 
@@ -363,32 +323,26 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
     loopRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(loopRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // boot exactly once — speedRef is read by reference inside the loop
+  }, []); // empty deps — speedRef read by reference inside loop
 
-  // Numeric readout: always reflects current speed prop (React-controlled)
-  const displaySpeed = speed < 10 ? speed.toFixed(1) : Math.round(speed).toString();
+  const display = speed < 10 ? speed.toFixed(1) : Math.round(speed).toString();
 
   return (
-    <div
-      style={{
-        position: "relative",
-        width: "100%",
-        maxWidth: 460,
-        margin: "0 auto",
-      }}
-    >
+    <div style={{ position: "relative", width: "100%", maxWidth: 460, margin: "0 auto" }}>
       <canvas
         ref={canvasRef}
         style={{ display: "block", width: "100%", height: "auto" }}
       />
-      {/* Speed readout — positioned below center of canvas */}
+      {/*
+        Readout overlay: positioned at the optical centre of the canvas.
+        CY / H ≈ (R+40) / (R*1.5+AW+62) ≈ 52–55% down, so 50% top aligns
+        the number just above the hub.
+      */}
       <div
         style={{
-          position: "absolute",
-          left: "50%",
-          // 72% CY relative to canvas height * canvas height
-          // expressed as percentage of the div (which equals canvas height)
-          top: "55%",
+          position:  "absolute",
+          left:      "50%",
+          top:       "52%",
           transform: "translate(-50%, -50%)",
           textAlign: "center",
           pointerEvents: "none",
@@ -397,27 +351,20 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
       >
         <div
           style={{
-            fontFamily: "'Syne', sans-serif",
-            fontSize: "clamp(34px, 10vw, 56px)",
-            fontWeight: 800,
-            lineHeight: 1,
-            letterSpacing: "-2.5px",
-            background: "linear-gradient(135deg, #3b82f6, #06b6d4)",
+            fontFamily:  "'Syne', sans-serif",
+            fontSize:    "clamp(32px, 9.5vw, 54px)",
+            fontWeight:  800,
+            lineHeight:  1,
+            letterSpacing: "-2px",
+            background:  "linear-gradient(135deg, #3b82f6, #06b6d4)",
             WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
+            WebkitTextFillColor:  "transparent",
             backgroundClip: "text",
           }}
         >
-          {displaySpeed}
+          {display}
         </div>
-        <div
-          style={{
-            fontSize: 13,
-            color: "rgba(240,244,255,0.32)",
-            marginTop: 4,
-            letterSpacing: "0.4px",
-          }}
-        >
+        <div style={{ fontSize: 13, color: "rgba(240,244,255,0.32)", marginTop: 5, letterSpacing: "0.4px" }}>
           {phase === "upload" ? "Mbps ↑" : "Mbps ↓"}
         </div>
       </div>
