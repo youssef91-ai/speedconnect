@@ -106,7 +106,7 @@ async function measureDownload(
           totalBytes += b;
           windowBytes += b;
           const now = performance.now();
-          if (now - windowT > 280) {
+          if (now - windowT > 150) {
             const spd = (windowBytes * 8) / ((now - windowT) / 1000) / 1e6;
             onSpeed(Math.round(spd * 10) / 10);
             windowBytes = 0;
@@ -155,7 +155,7 @@ async function measureUpload(
         totalBytes += PAYLOAD;
         windowBytes += PAYLOAD;
         const now = performance.now();
-        if (now - windowT > 380) {
+        if (now - windowT > 150) {
           const spd = (windowBytes * 8) / ((now - windowT) / 1000) / 1e6;
           onSpeed(Math.round(spd * 10) / 10);
           windowBytes = 0;
@@ -264,7 +264,6 @@ export function useSpeedTest() {
         ...s,
         liveDownload: dlFinal,
         progress: 76,
-        currentSpeed: 0,
         phaseLabel: `Download complete — ${dlFinal} Mbps`,
       }));
       await sleep(320);
@@ -302,7 +301,7 @@ export function useSpeedTest() {
         ...s,
         phase: "done",
         progress: 100,
-        currentSpeed: 0,
+        currentSpeed: ulFinal,
         liveUpload: ulFinal,
         phaseLabel: "Test complete!",
         result,
