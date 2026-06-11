@@ -11,7 +11,9 @@ const tools = [
   { href: "/tools/my-ip", icon: "🌐", name: "What's My IP", description: "Instantly reveal your public IPv4 and IPv6 addresses along with your geolocation, ISP, and ASN.", tags: ["IP", "Geolocation", "ISP"] },
   { href: "/tools/ping-test", icon: "📡", name: "Ping Test", description: "Measure real-time latency to global servers. Spot packet loss, routing anomalies, and network instability.", tags: ["Latency", "Jitter", "Ping"] },
   { href: "/tools/dns-lookup", icon: "🔍", name: "DNS Lookup", description: "Query A, AAAA, MX, CNAME, TXT, and NS records. Verify propagation and debug DNS misconfigurations.", tags: ["DNS", "Records", "Propagation"] },
-  { href: "/tools/ip-lookup", icon: "🗺️", name: "IP Intelligence", description: "Deep-dive any IP address — geolocation, ASN, organization, threat intel, and reverse DNS.", tags: ["IP", "WHOIS", "ASN"] },
+  { href: "/tools/ip-lookup",      icon: "🗺️", name: "IP Intelligence",  description: "Deep-dive any IP address — geolocation, ASN, organization, threat intel, and reverse DNS.", tags: ["IP", "WHOIS", "ASN"] },
+  { href: "/tools/vpn-detector",   icon: "🛡️", name: "VPN Detector",      description: "Detect whether your connection routes through a VPN, datacenter proxy, or Tor exit node.", tags: ["VPN", "Proxy", "Tor"] },
+  { href: "/tools/speed-history",  icon: "📈", name: "Speed History",      description: "View and export all your past speed test results. Track trends over time.", tags: ["History", "Export", "Charts"] },
 ];
 
 export default function ToolsPage() {
@@ -28,7 +30,7 @@ export default function ToolsPage() {
           </p>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 20 }} className="tools-index-grid">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 20 }} className="tools-index-grid">
           {tools.map((tool) => (
             <Link key={tool.href} href={tool.href} style={{ textDecoration: "none", color: "inherit" }}>
               <div

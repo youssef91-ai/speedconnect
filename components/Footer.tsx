@@ -13,6 +13,8 @@ export function Footer() {
         { label: "Ping Test", href: "/tools/ping-test" },
         { label: "DNS Lookup", href: "/tools/dns-lookup" },
         { label: "IP Lookup", href: "/tools/ip-lookup" },
+        { label: "VPN Detector", href: "/tools/vpn-detector" },
+        { label: "Speed History", href: "/tools/speed-history" },
       ],
     },
     {
