@@ -113,7 +113,22 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
   speedRef.current = speed;
 
   useEffect(() => {
-    const KS = 0.055, DAMP = 0.88, MAX_VEL = 8;  // smooth, inertial
+    // ── Speedtest.net-style spring physics ────────────────────────────────
+    // Models a heavy mechanical needle with high rotational inertia.
+    //
+    // Spring equation (per-frame, dt-normalised):
+    //   acceleration = (target - position) * STIFFNESS
+    //   velocity     = (velocity + acceleration) * DAMPING^dt
+    //   position    += velocity * dt
+    //
+    // STIFFNESS: low → slow to respond (heavy feel)
+    // DAMPING:   high → loses energy slowly → natural overshoot + settle
+    // No velocity cap: inertia handles large jumps naturally via gradual ramp-up
+    const STIFFNESS = 0.032;   // very low — needle is heavy, builds speed slowly
+    const DAMPING   = 0.92;    // high — preserves momentum, realistic overshoot
+    const SETTLE_POS = 0.08;   // degrees — snap to target inside this threshold
+    const SETTLE_VEL = 0.02;   // deg/frame — velocity considered "stopped"
+
     let lastTs = 0;
 
     function updateDOM(angleDeg: number, spd: number) {
@@ -121,43 +136,48 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
       const tx  = CX + NEEDLE_LEN * Math.cos(rad);
       const ty  = CY + NEEDLE_LEN * Math.sin(rad);
 
-      needleRef.current?.setAttribute("x2", tx.toFixed(2));
-      needleRef.current?.setAttribute("y2", ty.toFixed(2));
+      needleRef.current?.setAttribute("x2", tx.toFixed(3));
+      needleRef.current?.setAttribute("y2", ty.toFixed(3));
 
-      // Arc driven by exact needle angle — always ends at needle tip
-      const endA = angleDeg;
-      const path = arcPath(R, SA, endA);
+      // Arc ends exactly at the animated needle tip
+      const path = arcPath(R, SA, angleDeg);
       arcRef.current?.setAttribute("d", path);
       glowRef.current?.setAttribute("d", path);
 
-      tipRef.current?.setAttribute("cx", tx.toFixed(2));
-      tipRef.current?.setAttribute("cy", ty.toFixed(2));
+      tipRef.current?.setAttribute("cx", tx.toFixed(3));
+      tipRef.current?.setAttribute("cy", ty.toFixed(3));
       tipRef.current?.setAttribute("opacity", spd > 0.5 ? "1" : "0");
     }
 
     function loop(ts: number) {
-      const dt  = Math.min((ts - lastTs) / 16.667, 3);
+      // dt relative to 60fps baseline; capped at 3 frames to avoid
+      // huge jumps after tab switch / page-hidden resume
+      const dt = Math.min((ts - lastTs) / 16.667, 3.0);
       lastTs = ts;
 
-      const target = SA + SWD * toPct(speedRef.current);
-      const cur    = angleRef.current;
-      const vel    = velRef.current;
-      const delta  = target - cur;
-      const rawVel = (vel + delta * KS * dt) * Math.pow(DAMP, dt);
-      // Cap velocity so large speed jumps don't snap the needle
-      const newVel = Math.sign(rawVel) * Math.min(Math.abs(rawVel), MAX_VEL);
+      const targetAngle = SA + SWD * toPct(speedRef.current);
+      const pos = angleRef.current;
+      const vel = velRef.current;
 
-      if (Math.abs(delta) < 0.12 && Math.abs(newVel) < 0.04) {
-        angleRef.current = target;
+      // Spring force proportional to displacement
+      const force       = (targetAngle - pos) * STIFFNESS;
+      // Apply force to velocity, then decay velocity (damping^dt for frame-rate independence)
+      const newVel      = (vel + force * dt) * Math.pow(DAMPING, dt);
+      const newPos      = pos + newVel * dt;
+
+      // Settle when close enough — prevents perpetual micro-oscillation
+      if (Math.abs(targetAngle - pos) < SETTLE_POS && Math.abs(newVel) < SETTLE_VEL) {
+        angleRef.current = targetAngle;
         velRef.current   = 0;
       } else {
-        angleRef.current = cur + newVel * dt;
+        angleRef.current = newPos;
         velRef.current   = newVel;
       }
 
       updateDOM(angleRef.current, speedRef.current);
 
-      if (ts - lastNumRef.current > 50) {
+      // Update speed number at ~30fps to stay synced with needle without jank
+      if (ts - lastNumRef.current > 33) {
         lastNumRef.current = ts;
         const v = speedRef.current;
         setDisplay(v < 10 ? v.toFixed(1) : Math.round(v).toString());
