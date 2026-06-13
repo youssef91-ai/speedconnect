@@ -19,13 +19,13 @@ import { useEffect, useRef, useState } from "react";
 
 const BREAKPOINTS: Array<[number, number]> = [
   [0,     0.000],
-  [5,     0.083],
-  [10,    0.167],
-  [50,    0.333],
+  [5,     0.110],
+  [10,    0.200],
+  [50,    0.360],
   [100,   0.500],
-  [250,   0.667],
-  [500,   0.833],
-  [750,   0.917],
+  [250,   0.640],
+  [500,   0.800],
+  [750,   0.890],
   [1000,  1.000],
 ];
 
@@ -50,18 +50,18 @@ function toPct(speed: number): number {
 
 // ─── SVG geometry ─────────────────────────────────────────────────────────────
 const VW  = 420;   // viewBox width  — wider for better label room
-const VH  = 310;   // viewBox height
+const VH  = 330;   // viewBox height — extra room for speed number
 const CX  = 210;   // pivot x (center)
 const CY  = 200;   // pivot y
 const R   = 162;   // arc radius
-const AW  = 26;    // arc stroke-width
+const AW  = 31;    // arc stroke-width (+20%)
 const SA  = 150;   // start angle° — 0 Mbps, bottom-left
 const EA  = 390;   // end   angle° — 1000 Mbps, bottom-right (=30°)
 const SWD = 240;   // total sweep°
 
 const NEEDLE_LEN = Math.round(R * 0.94);  // ~152px
 const HUB_R      = 7;
-const LABEL_R    = R - AW - 8;            // inside arc
+const LABEL_R    = R - AW - 10;           // inside thicker arc
 
 const LABELS: number[] = [0, 5, 10, 50, 100, 250, 500, 750, 1000];
 
@@ -289,7 +289,7 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
           ref={glowRef}
           d={initArc}
           fill="none" stroke="url(#arcGrad)"
-          strokeWidth={AW + 12} strokeLinecap="butt"
+          strokeWidth={AW + 10} strokeLinecap="butt"
           opacity="0.3" filter="url(#arcGlow)"
         />
 
@@ -335,7 +335,7 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
 
         {/* 11. Unit label */}
         <text
-          x={CX} y={CY + 44}
+          x={CX} y={CY + 80}
           textAnchor="middle" dy="0.35em"
           fill="rgba(240,244,255,0.28)"
           fontSize="11" letterSpacing="1"
@@ -349,7 +349,7 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
       <div style={{
         position: "absolute",
         left: "50%",
-        top: `${(CY + 10) / VH * 100}%`,
+        top: `${(CY + 40) / VH * 100}%`,
         transform: "translate(-50%, -50%)",
         textAlign: "center",
         pointerEvents: "none",
