@@ -59,8 +59,8 @@ const SA  = 150;   // start angle° — 0 Mbps, bottom-left
 const EA  = 390;   // end   angle° — 1000 Mbps, bottom-right (=30°)
 const SWD = 240;   // total sweep°
 
-const NEEDLE_LEN = Math.round(R * 0.91);  // ~147px
-const HUB_R      = 9;
+const NEEDLE_LEN = Math.round(R * 0.94);  // ~152px
+const HUB_R      = 7;
 const LABEL_R    = R - AW - 8;            // inside arc
 
 const LABELS: number[] = [0, 5, 10, 50, 100, 250, 500, 750, 1000];
@@ -124,9 +124,9 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
       needleRef.current?.setAttribute("x2", tx.toFixed(2));
       needleRef.current?.setAttribute("y2", ty.toFixed(2));
 
-      const clamp = Math.min(Math.max(angleDeg, SA), EA);
-      const endA  = clamp <= SA + 0.3 ? SA + 0.3 : clamp;
-      const path  = arcPath(R, SA, endA);
+      // Arc driven by exact needle angle — always ends at needle tip
+      const endA = angleDeg;
+      const path = arcPath(R, SA, endA);
       arcRef.current?.setAttribute("d", path);
       glowRef.current?.setAttribute("d", path);
 
