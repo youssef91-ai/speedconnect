@@ -18,15 +18,15 @@ import { useEffect, useRef, useState } from "react";
 // so the needle moves naturally, not linearly.
 
 const BREAKPOINTS: Array<[number, number]> = [
-  [0,     0.000],
-  [5,     0.110],
-  [10,    0.200],
-  [50,    0.360],
-  [100,   0.500],
-  [250,   0.640],
-  [500,   0.800],
-  [750,   0.890],
-  [1000,  1.000],
+  [0,     0.000],   // 150° bottom-left
+  [5,     0.130],   // mirror of 750=0.870
+  [10,    0.220],   // mirror of 500=0.780
+  [50,    0.370],   // mirror of 250=0.630
+  [100,   0.500],   // 270° exact top-center
+  [250,   0.630],   // mirror of 50
+  [500,   0.780],   // mirror of 10
+  [750,   0.870],   // mirror of 5
+  [1000,  1.000],   // 390° bottom-right
 ];
 
 function toPct(speed: number): number {
@@ -50,18 +50,18 @@ function toPct(speed: number): number {
 
 // ─── SVG geometry ─────────────────────────────────────────────────────────────
 const VW  = 420;   // viewBox width  — wider for better label room
-const VH  = 330;   // viewBox height — extra room for speed number
+const VH  = 350;   // viewBox height — fits outside arc labels
 const CX  = 210;   // pivot x (center)
-const CY  = 200;   // pivot y
+const CY  = 210;   // pivot y — shifted for label clearance
 const R   = 162;   // arc radius
-const AW  = 31;    // arc stroke-width (+20%)
+const AW  = 34;    // arc stroke-width — closer to Speedtest.net
 const SA  = 150;   // start angle° — 0 Mbps, bottom-left
 const EA  = 390;   // end   angle° — 1000 Mbps, bottom-right (=30°)
 const SWD = 240;   // total sweep°
 
 const NEEDLE_LEN = Math.round(R * 0.94);  // ~152px
 const HUB_R      = 7;
-const LABEL_R    = R - AW - 10;           // inside thicker arc
+const LABEL_R    = R + Math.floor(AW / 2) + 10; // outside arc — matches Speedtest.net
 
 const LABELS: number[] = [0, 5, 10, 50, 100, 250, 500, 750, 1000];
 
@@ -113,7 +113,7 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
   speedRef.current = speed;
 
   useEffect(() => {
-    const KS = 0.13, DAMP = 0.78;
+    const KS = 0.055, DAMP = 0.88, MAX_VEL = 8;  // smooth, inertial
     let lastTs = 0;
 
     function updateDOM(angleDeg: number, spd: number) {
@@ -143,9 +143,11 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
       const cur    = angleRef.current;
       const vel    = velRef.current;
       const delta  = target - cur;
-      const newVel = (vel + delta * KS * dt) * Math.pow(DAMP, dt);
+      const rawVel = (vel + delta * KS * dt) * Math.pow(DAMP, dt);
+      // Cap velocity so large speed jumps don't snap the needle
+      const newVel = Math.sign(rawVel) * Math.min(Math.abs(rawVel), MAX_VEL);
 
-      if (Math.abs(delta) < 0.05 && Math.abs(newVel) < 0.05) {
+      if (Math.abs(delta) < 0.12 && Math.abs(newVel) < 0.04) {
         angleRef.current = target;
         velRef.current   = 0;
       } else {
