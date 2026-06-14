@@ -1,23 +1,17 @@
-import { NextResponse } from "next/server";
-
+// Minimal ping endpoint — Edge runtime for lowest latency.
+// Returns 204 with no body. Keep-alive is handled by the runtime.
 export const runtime = "edge";
 
-export async function HEAD() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      "Cache-Control": "no-store",
-      "Access-Control-Allow-Origin": "*",
-    },
-  });
+const HEADERS = {
+  "Cache-Control": "no-store, no-cache",
+  "Access-Control-Allow-Origin": "*",
+  "Connection": "keep-alive",
+} as const;
+
+export function HEAD() {
+  return new Response(null, { status: 204, headers: HEADERS });
 }
 
-export async function GET() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      "Cache-Control": "no-store",
-      "Access-Control-Allow-Origin": "*",
-    },
-  });
+export function GET() {
+  return new Response(null, { status: 204, headers: HEADERS });
 }
