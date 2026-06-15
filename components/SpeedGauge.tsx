@@ -17,16 +17,18 @@ import { useEffect, useRef, useState } from "react";
 // Between each pair the mapping is a smooth log-interpolated curve
 // so the needle moves naturally, not linearly.
 
+// Breakpoints reverse-engineered from Speedtest.net visual gap analysis.
+// STN uses true log scale: 0/5/10 are tight, 10→250 is expanded, right compressed.
 const BREAKPOINTS: Array<[number, number]> = [
-  [0,     0.000],   // 150° bottom-left
-  [5,     0.130],   // mirror of 750=0.870
-  [10,    0.220],   // mirror of 500=0.780
-  [50,    0.370],   // mirror of 250=0.630
-  [100,   0.500],   // 270° exact top-center
-  [250,   0.630],   // mirror of 50
-  [500,   0.780],   // mirror of 10
-  [750,   0.870],   // mirror of 5
-  [1000,  1.000],   // 390° bottom-right
+  [0,     0.000],   // 150°  — bottom-left (tight cluster below)
+  [5,     0.075],   // 168°  — just above 0, STN ~18° gap
+  [10,    0.125],   // 180°  — STN ~12° gap from 5
+  [50,    0.350],   // 234°  — STN large 54° gap (log expansion)
+  [100,   0.500],   // 270°  — exact top-center, STN ~36° from 50
+  [250,   0.690],   // 315.6° — STN ~46° gap (large step right of 100)
+  [500,   0.848],   // 353.5° — STN ~38° gap
+  [750,   0.930],   // 373.2° — STN ~20° gap
+  [1000,  1.000],   // 390°  — bottom-right (tight at end)
 ];
 
 function toPct(speed: number): number {
@@ -124,10 +126,15 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
     // STIFFNESS: low → slow to respond (heavy feel)
     // DAMPING:   high → loses energy slowly → natural overshoot + settle
     // No velocity cap: inertia handles large jumps naturally via gradual ramp-up
-    const STIFFNESS = 0.032;   // very low — needle is heavy, builds speed slowly
-    const DAMPING   = 0.92;    // high — preserves momentum, realistic overshoot
-    const SETTLE_POS = 0.08;   // degrees — snap to target inside this threshold
-    const SETTLE_VEL = 0.02;   // deg/frame — velocity considered "stopped"
+    // Speedtest.net feel: heavy flywheel — builds speed slowly, overshoots, settles.
+    // At 120° gap: reaches max ~2°/frame → takes ~3-4s to traverse full gauge.
+    const STIFFNESS  = 0.018;  // very low stiffness — heavy, reluctant to move
+    const DAMPING    = 0.93;   // high damping retention — momentum preserved, slow settle
+    const SETTLE_POS = 0.12;   // snap threshold (degrees)
+    const SETTLE_VEL = 0.010;  // stopped threshold (deg/frame)
+    // Velocity ceiling grows slowly with distance → needle accelerates gradually
+    // cap(120°) = 2.0, cap(60°) = 1.4, cap(10°) = free spring
+    const maxVel = (delta: number) => Math.min(2.2, Math.abs(delta) * 0.015 + 0.5);
 
     let lastTs = 0;
 
@@ -160,10 +167,13 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
       const vel = velRef.current;
 
       // Spring force proportional to displacement
-      const force       = (targetAngle - pos) * STIFFNESS;
-      // Apply force to velocity, then decay velocity (damping^dt for frame-rate independence)
-      const newVel      = (vel + force * dt) * Math.pow(DAMPING, dt);
-      const newPos      = pos + newVel * dt;
+      const force   = (targetAngle - pos) * STIFFNESS;
+      const rawVel  = (vel + force * dt) * Math.pow(DAMPING, dt);
+      // Distance-proportional velocity cap: needle creeps slowly at large distances,
+      // springs freely near the target — mechanical inertia feel
+      const cap     = maxVel(targetAngle - pos);
+      const newVel  = Math.sign(rawVel) * Math.min(Math.abs(rawVel), cap);
+      const newPos  = pos + newVel * dt;
 
       // Settle when close enough — prevents perpetual micro-oscillation
       if (Math.abs(targetAngle - pos) < SETTLE_POS && Math.abs(newVel) < SETTLE_VEL) {
@@ -329,7 +339,7 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
           x1={CX} y1={CY}
           x2={initTx} y2={initTy}
           stroke="rgba(255,255,255,0.95)"
-          strokeWidth="2.4" strokeLinecap="round"
+          strokeWidth="3.0" strokeLinecap="round"
           style={{ filter: "drop-shadow(0 2px 5px rgba(0,0,0,0.75))" }}
         />
 
