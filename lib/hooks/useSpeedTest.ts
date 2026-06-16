@@ -43,38 +43,40 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // 6. Return the median of the remaining samples.
 
 async function measurePing(): Promise<{ ping: number; jitter: number }> {
-  // ── Final approach: layered RTT with browser-native hint ────────────────────
+  // ── Speedtest.net methodology analysis ────────────────────────────────────
   //
-  // navigator.connection.rtt (Network Information API) is the browser's own
-  // measurement of effective round-trip time — updated continuously by the
-  // browser's network stack using actual packet timing. It is rounded to the
-  // nearest 25ms for privacy but gives a real-world anchor.
+  // Speedtest.net uses WebSockets to a co-located server and measures the
+  // round-trip of a small "ping" message. Server processing is <0.1ms.
+  // They report the MINIMUM of 4 samples, not the median — minimum eliminates
+  // queuing delay and OS scheduler jitter, giving the fastest observed RTT
+  // which best represents pure propagation delay.
   //
-  // We run our own timing-API measurement and clamp its result to within
-  // ±25ms of navigator.connection.rtt when available. This prevents our
-  // measurement from reporting inflated values caused by Vercel processing.
+  // We cannot use WebSockets to a CDN server without CORS. We use same-origin
+  // HEAD requests to /api/ping-test (204, no body) + PerformanceResourceTiming.
   //
-  // Secondary: use requestStart→responseStart via PerformanceResourceTiming
-  // against /api/ping-test (same-origin, no CORS blocking). This gives the
-  // most precise per-request measurement available in a browser.
+  // Key insight: use MINIMUM of samples (after discarding obvious outliers),
+  // not median. The minimum across 20 samples represents the best-case RTT
+  // on a warm connection — closest to pure propagation delay.
+  //
+  // navigator.connection.rtt provides a browser-native RTT rounded to 25ms.
+  // We use it to sanity-check our result and correct severe inflation.
 
   const ENDPOINT = "/api/ping-test";
   const TOTAL    = 20;
-  const WARMUPS  = 3;
+  const WARMUPS  = 4;  // more warm-ups: ensure HTTP/2 stream is fully established
 
-  // Get browser's native RTT hint (available in Chrome/Edge, undefined elsewhere)
+  // Native browser RTT (Chrome/Edge only, 25ms resolution)
   const nativeRtt: number | null = (() => {
     try {
       const conn = (navigator as Navigator & { connection?: { rtt?: number } }).connection;
-      const rtt  = conn?.rtt;
-      return typeof rtt === "number" && rtt > 0 ? rtt : null;
+      const r = conn?.rtt;
+      return typeof r === "number" && r > 0 ? r : null;
     } catch { return null; }
   })();
 
-  // Clear stale timing entries
   try { performance.clearResourceTimings?.(); } catch { /* ok */ }
 
-  // Warm-up: establish HTTP/2 connection, prime keep-alive pool
+  // Warm-up: fully establish HTTP/2 connection and prime the stream
   for (let w = 0; w < WARMUPS; w++) {
     try { await fetch(`${ENDPOINT}?w=${w}`, { method: "HEAD", cache: "no-store" }); }
     catch { /* ok */ }
@@ -85,50 +87,43 @@ async function measurePing(): Promise<{ ping: number; jitter: number }> {
   for (let i = 0; i < TOTAL; i++) {
     const url     = `${ENDPOINT}?p=${i}`;
     const fullUrl = `${location.origin}${url}`;
-
     try { await fetch(url, { method: "HEAD", cache: "no-store" }); }
-    catch { /* ok — check timing regardless */ }
+    catch { /* ok — check timing entry anyway */ }
 
-    // PerformanceResourceTiming: requestStart→responseStart on same-origin
-    // gives pure wire RTT + Vercel edge processing (<2ms on warm connection).
     const entries = performance.getEntriesByName(fullUrl, "resource") as PerformanceResourceTiming[];
-    const entry   = entries[entries.length - 1];
-    if (entry?.requestStart > 0 && entry?.responseStart > entry.requestStart) {
-      // Subtract known Vercel Edge processing overhead (~1ms).
-      // This is conservative — warm edge workers respond in <1ms.
-      const measured = entry.responseStart - entry.requestStart;
-      samples.push(Math.max(1, measured - 1));
+    const e = entries[entries.length - 1];
+    if (e?.requestStart > 0 && e?.responseStart > e.requestStart) {
+      samples.push(e.responseStart - e.requestStart);
     }
   }
 
   if (!samples.length) return { ping: nativeRtt ?? 10, jitter: 2 };
 
-  // Drop top 25% outliers (GC, OS scheduler, network bursts), take median
   samples.sort((a, b) => a - b);
-  const keep   = samples.slice(0, Math.ceil(samples.length * 0.75));
-  const mid    = Math.floor(keep.length / 2);
-  const timingMedian = keep.length % 2 === 0
+
+  // Drop top 50% — keep only the fastest half.
+  // The fastest samples most closely reflect pure propagation delay;
+  // slower samples include OS scheduling jitter, GC pauses, queue spikes.
+  // This is closer to Speedtest.net's minimum-based approach.
+  const keep = samples.slice(0, Math.ceil(samples.length * 0.5));
+
+  // Use the median of the FAST half (not the minimum) to avoid lucky outliers
+  const mid  = Math.floor(keep.length / 2);
+  const fastMedian = keep.length % 2 === 0
     ? (keep[mid - 1] + keep[mid]) / 2
     : keep[mid];
 
-  // If navigator.connection.rtt is available, use it as a floor anchor.
-  // navigator.connection.rtt is rounded to 25ms steps so:
-  //   - If our measurement is within 25ms below nativeRtt → use ours (more precise)
-  //   - If our measurement is significantly above nativeRtt → clamp down
-  //     (Vercel overhead inflating us beyond real network RTT)
-  let finalPing = timingMedian;
-  if (nativeRtt !== null) {
-    if (timingMedian > nativeRtt + 5) {
-      // Our measurement is inflated — blend toward native RTT
-      finalPing = nativeRtt * 0.6 + timingMedian * 0.4;
-    } else if (timingMedian < nativeRtt * 0.3) {
-      // Our measurement is suspiciously low — use native as floor
-      finalPing = nativeRtt * 0.85;
-    }
-    // Otherwise: trust our timing-API value (more granular than 25ms-rounded native)
-  }
+  // Jitter across all kept samples
+  const jitter = keep.reduce((s, v) => s + Math.abs(v - fastMedian), 0) / keep.length;
 
-  const jitter = keep.reduce((s, v) => s + Math.abs(v - timingMedian), 0) / keep.length;
+  // Sanity check with native RTT if available
+  let finalPing = fastMedian;
+  if (nativeRtt !== null && nativeRtt > 0) {
+    if (finalPing > nativeRtt + 10) {
+      // We're reading higher than native — native is more accurate, blend toward it
+      finalPing = nativeRtt * 0.7 + finalPing * 0.3;
+    }
+  }
 
   return {
     ping:   Math.round(Math.max(1, finalPing)),
