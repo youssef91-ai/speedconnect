@@ -17,18 +17,20 @@ import { useEffect, useRef, useState } from "react";
 // Between each pair the mapping is a smooth log-interpolated curve
 // so the needle moves naturally, not linearly.
 
-// Breakpoints reverse-engineered from Speedtest.net visual gap analysis.
-// STN uses true log scale: 0/5/10 are tight, 10→250 is expanded, right compressed.
+// Breakpoints pixel-matched to Speedtest.net screenshot (image 1).
+// Gaps measured from STN arc positions:
+//   0→5:    15°   5→10:   10°   10→50:  65°   50→100: 30°
+//   100→250: 35°  250→500: 30°  500→750: 20°  750→1000: 35°
 const BREAKPOINTS: Array<[number, number]> = [
-  [0,     0.000],   // 150°  — bottom-left (tight cluster below)
-  [5,     0.075],   // 168°  — just above 0, STN ~18° gap
-  [10,    0.125],   // 180°  — STN ~12° gap from 5
-  [50,    0.350],   // 234°  — STN large 54° gap (log expansion)
-  [100,   0.500],   // 270°  — exact top-center, STN ~36° from 50
-  [250,   0.690],   // 315.6° — STN ~46° gap (large step right of 100)
-  [500,   0.848],   // 353.5° — STN ~38° gap
-  [750,   0.930],   // 373.2° — STN ~20° gap
-  [1000,  1.000],   // 390°  — bottom-right (tight at end)
+  [0,     0.000],   //   0° — bottom-left
+  [5,     0.063],   //  15° — just above 0
+  [10,    0.104],   //  25° — lower-left
+  [50,    0.375],   //  90° — upper-left
+  [100,   0.500],   // 120° — exact top-center
+  [250,   0.646],   // 155° — upper-right
+  [500,   0.771],   // 185° — right side
+  [750,   0.854],   // 205° — lower-right
+  [1000,  1.000],   // 240° — bottom-right
 ];
 
 function toPct(speed: number): number {
