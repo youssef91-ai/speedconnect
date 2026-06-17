@@ -1127,7 +1127,7 @@ export function SpeedTestClient() {
                 padding: "4px 12px", borderRadius: 100,
                 fontSize: 11, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".6px",
                 border: "1px solid",
-                color: state.phase === "done" ? "#6ee7b7" : isTesting ? "#93c5fd" : "#6ee7b7",
+                color: state.phase === "done" && state.currentSpeed > 0 ? "#6ee7b7" : isTesting ? "#93c5fd" : "#6ee7b7",
                 borderColor: state.phase === "done"
                   ? "rgba(110,231,183,.3)"
                   : isTesting ? "rgba(147,197,253,.3)" : "rgba(110,231,183,.22)",
@@ -1143,7 +1143,7 @@ export function SpeedTestClient() {
                   display: "inline-block", animation: "blink 1.8s infinite",
                 }}
               />
-              {state.phase === "done" ? "Complete" : isTesting ? "Testing…" : "Ready"}
+              {state.phase === "done" && state.currentSpeed > 0 ? "Complete" : isTesting ? "Testing…" : "Ready"}
             </div>
           </div>
 
@@ -1204,64 +1204,33 @@ export function SpeedTestClient() {
             </div>
           )}
 
-          {/* CTA — large GO button when done, standard button otherwise */}
-          {state.phase === "done" ? (
-            <div style={{ textAlign: "center", marginTop: 8, marginBottom: 4 }}>
-              <button
-                onClick={run}
-                style={{
-                  width: 120, height: 120, borderRadius: "50%",
-                  background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
-                  color: "#fff", fontSize: 22, fontWeight: 800,
-                  fontFamily: "'Syne', sans-serif", border: "none", cursor: "pointer",
-                  boxShadow: "0 0 0 8px rgba(59,130,246,0.15), 0 8px 32px rgba(59,130,246,0.35)",
-                  transition: "transform .18s, box-shadow .18s",
-                  letterSpacing: "1px",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.06)";
-                  (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 0 0 12px rgba(59,130,246,0.2), 0 12px 48px rgba(59,130,246,0.5)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
-                  (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 0 0 8px rgba(59,130,246,0.15), 0 8px 32px rgba(59,130,246,0.35)";
-                }}
-              >
-                GO
-              </button>
-              <div style={{ marginTop: 12, fontSize: 12, color: "rgba(240,244,255,0.35)", letterSpacing: ".3px" }}>
-                Run another test
-              </div>
-            </div>
-          ) : (
-            <>
-              <button
-                onClick={run}
-                disabled={false}
-                style={{
-                  width: "100%", padding: 17, borderRadius: 14,
-                  background: "linear-gradient(135deg, #3b82f6, #2563eb 50%, #8b5cf6)",
-                  color: "#fff", fontSize: 16, fontWeight: 600,
-                  fontFamily: "'Syne', sans-serif", border: "none", cursor: "pointer",
-                  transition: "transform .18s, box-shadow .18s",
-                  position: "relative", overflow: "hidden",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.008)";
-                  (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 12px 36px rgba(59,130,246,0.38)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
-                  (e.currentTarget as HTMLButtonElement).style.boxShadow = "none";
-                }}
-              >
-                {btnLabel}
-              </button>
-              <div style={{ textAlign: "center", marginTop: 12, fontSize: 11, color: "rgba(240,244,255,0.28)", letterSpacing: ".3px" }}>
-                Runs entirely in your browser · No download required
-              </div>
-            </>
-          )}
+          {/* CTA */}
+          <button
+            onClick={run}
+            style={{
+              width: "100%", padding: 17, borderRadius: 14,
+              background: state.phase === "done"
+                ? "linear-gradient(135deg, #10b981, #0891b2)"
+                : "linear-gradient(135deg, #3b82f6, #2563eb 50%, #8b5cf6)",
+              color: "#fff", fontSize: 16, fontWeight: 600,
+              fontFamily: "'Syne', sans-serif", border: "none", cursor: "pointer",
+              transition: "transform .18s, box-shadow .18s, background .3s",
+              position: "relative", overflow: "hidden",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.008)";
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 12px 36px rgba(59,130,246,0.38)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = "none";
+            }}
+          >
+            {state.phase === "done" ? "↺ Run Speed Test Again" : btnLabel}
+          </button>
+          <div style={{ textAlign: "center", marginTop: 12, fontSize: 11, color: "rgba(240,244,255,0.28)", letterSpacing: ".3px" }}>
+            {state.phase === "done" ? "Results above · Click to test again" : "Runs entirely in your browser · No download required"}
+          </div>
         </div>
 
         {/* Results */}
