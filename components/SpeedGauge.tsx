@@ -17,20 +17,19 @@ import { useEffect, useRef, useState } from "react";
 // Between each pair the mapping is a smooth log-interpolated curve
 // so the needle moves naturally, not linearly.
 
-// Breakpoints pixel-matched to Speedtest.net screenshot (image 1).
-// Gaps measured from STN arc positions:
-//   0→5:    15°   5→10:   10°   10→50:  65°   50→100: 30°
-//   100→250: 35°  250→500: 30°  500→750: 20°  750→1000: 35°
+// Balanced left/right visual distribution — every adjacent gap >= 24°
+// so no two labels ever crowd together at any screen size.
+// Mirror-symmetric around 100 Mbps for natural eye balance.
 const BREAKPOINTS: Array<[number, number]> = [
   [0,     0.000],   //   0° — bottom-left
-  [5,     0.063],   //  15° — just above 0
-  [10,    0.104],   //  25° — lower-left
-  [50,    0.375],   //  90° — upper-left
+  [5,     0.117],   //  28° — clear of 0
+  [10,    0.217],   //  52° — clear diagonal separation from 5
+  [50,    0.392],   //  94° — upper-left
   [100,   0.500],   // 120° — exact top-center
-  [250,   0.646],   // 155° — upper-right
-  [500,   0.771],   // 185° — right side
-  [750,   0.854],   // 205° — lower-right
-  [1000,  1.000],   // 240° — bottom-right
+  [250,   0.608],   // 146° — upper-right (mirrors 50)
+  [500,   0.783],   // 188° — right side (mirrors 10)
+  [750,   0.883],   // 212° — lower-right (mirrors 5)
+  [1000,  1.000],   // 240° — bottom-right (mirrors 0)
 ];
 
 function toPct(speed: number): number {

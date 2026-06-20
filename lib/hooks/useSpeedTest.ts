@@ -55,21 +55,25 @@ async function measurePing(): Promise<{ ping: number; jitter: number }> {
   //
   // Fix: measure wall-clock against Cloudflare's anycast CDN (no-cors GET).
   // CF server processing <0.5ms → wall-clock ≈ pure network RTT.
-  // no-cors GET is a "simple request" — no preflight, browser fast-path.
-  // We fire requests one at a time (sequential) so the connection stays warm.
   //
-  // Speedtest.net does the same thing: measures RTT to a CDN-colocated server,
-  // reports the minimum of several samples.
+  // CRITICAL: use the HOSTNAME, not the bare IP "1.1.1.1". Browsers key
+  // TLS session resumption and HTTP/2 connection pooling by hostname.
+  // A bare IP frequently forces a FRESH TLS handshake (~40-60ms) on every
+  // single sample instead of reusing the warmed connection — this was the
+  // actual source of the 60-80ms readings.
+  //
+  // Speedtest.net measures RTT to a CDN-colocated server, reports the
+  // minimum of several samples on an already-warm connection.
 
-  const CF_URL   = "https://1.1.1.1/cdn-cgi/trace";  // Cloudflare anycast, <0.5ms processing
-  const FALLBACK = "https://www.google.com/generate_204"; // 204 no body, also fast
+  const CF_URL   = "https://cloudflare.com/cdn-cgi/trace";  // hostname — proper TLS/keepalive reuse
+  const FALLBACK = "https://www.google.com/generate_204";   // 204 no body, also fast
   const SAMPLES  = 16;
-  const WARMUPS  = 3;
+  const WARMUPS  = 4;
 
   async function wallRtt(url: string): Promise<number | null> {
     const t0 = performance.now();
     try {
-      await fetch(url, { method: "GET", mode: "no-cors", cache: "no-store" });
+      await fetch(url, { method: "GET", mode: "no-cors", cache: "no-store", keepalive: true });
       return performance.now() - t0;
     } catch {
       return null;
