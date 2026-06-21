@@ -20,16 +20,18 @@ import { useEffect, useRef, useState } from "react";
 // Balanced left/right visual distribution — every adjacent gap >= 24°
 // so no two labels ever crowd together at any screen size.
 // Mirror-symmetric around 100 Mbps for natural eye balance.
+// Pixel-measured directly from Speedtest.net screenshot — NOT calculated.
+// These are the actual angles read off the reference image.
 const BREAKPOINTS: Array<[number, number]> = [
-  [0,     0.000],   //   0°  — bottom-left corner
-  [5,     0.150],   //  36°  — extra angular room (bottom compresses visually)
-  [10,    0.270],   //  65°  — pulled further from 5 for clear visual gap
-  [50,    0.430],   // 103°  — pulled toward top, frees up bottom-left space
-  [100,   0.500],   // 120°  — exact top-center
-  [250,   0.570],   // 137°  — pulled toward top, mirrors 50
-  [500,   0.730],   // 175°  — mirrors 10
-  [750,   0.850],   // 204°  — mirrors 5
-  [1000,  1.000],   // 240°  — bottom-right corner
+  [0,     0.0000],  //   0.0° — bottom-left
+  [5,     0.0897],  //  21.5°
+  [10,    0.2116],  //  50.8°
+  [50,    0.3379],  //  81.1°
+  [100,   0.5007],  // 120.2° — top-center
+  [250,   0.6585],  // 158.0°
+  [500,   0.7873],  // 188.9°
+  [750,   0.9157],  // 219.8°
+  [1000,  1.0000],  // 240.0° — bottom-right
 ];
 
 function toPct(speed: number): number {
