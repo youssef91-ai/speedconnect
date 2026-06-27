@@ -1,42 +1,37 @@
-import { NextRequest, NextResponse } from "next/server";
-
 export const runtime = "edge";
 
-export async function POST(request: NextRequest) {
-  const t0 = Date.now();
-  let bytes = 0;
-
+// ── Minimal upload sink ──────────────────────────────────────────────────────
+// Previous version parsed the body, counted bytes, computed elapsed time,
+// and returned a JSON payload with those stats. All of that server-side
+// compute happened *after* the client's upload finished transmitting but
+// *before* the client's fetch() promise resolved — meaning JSON construction
+// time was being counted as part of the measured upload duration.
+//
+// Speedtest.net's upload endpoint does the same thing this does: accept
+// bytes, respond as fast as possible with no payload. The client times its
+// own write throughput; the server doesn't need to report anything back.
+export async function POST(request: Request) {
+  // Drain the body so the connection is properly released, but discard
+  // it immediately — no byte counting, no JSON construction.
   try {
-    const reader = request.body?.getReader();
-    if (reader) {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        bytes += value?.byteLength ?? 0;
-      }
-    }
+    await request.body?.cancel();
   } catch {
-    // absorb read errors
+    // ignore — body may already be consumed by the edge runtime
   }
 
-  const elapsed = (Date.now() - t0) / 1000;
-  const mbps = elapsed > 0 ? (bytes * 8) / elapsed / 1e6 : 0;
-
-  return NextResponse.json(
-    { received: bytes, elapsed, mbps: Math.round(mbps * 100) / 100 },
-    {
-      headers: {
-        "Cache-Control": "no-store",
-        "Access-Control-Allow-Origin": process.env.NEXT_PUBLIC_SITE_URL ?? "*",
-      },
-    }
-  );
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Cache-Control": "no-store",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
 }
 
 export async function OPTIONS() {
   return new Response(null, {
     headers: {
-      "Access-Control-Allow-Origin": process.env.NEXT_PUBLIC_SITE_URL ?? "*",
+      "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
     },

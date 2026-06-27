@@ -180,13 +180,62 @@ async function measureUpload(
   onSpeed: (mbps: number) => void,
   signal: AbortSignal
 ): Promise<number> {
-  const DURATION = 8_000;
-  const STREAMS = 3;
-  const PAYLOAD = 2 * 1024 * 1024;
+  // ── Upload bottleneck fixes (vs Speedtest.net methodology) ────────────────
+  //
+  // 1. PAYLOAD: 2MB -> 8MB. At 2MB, a fast uplink (100+ Mbps) finishes the
+  //    transfer in <20ms — meaning TLS handshake re-use, header overhead,
+  //    and server JSON-response construction dominate the measured time
+  //    instead of actual data throughput. Larger payloads amortize that
+  //    fixed per-request cost across more bytes, so the measurement
+  //    converges on true link speed instead of request-overhead speed.
+  //
+  // 2. STREAMS: 3 -> 6. Matches download's saturation strategy and gives
+  //    enough parallel HTTP/2 streams to fill high-bandwidth uplinks that
+  //    a single stream's TCP window can't saturate alone.
+  //
+  // 3. WARM-UP: added one discarded upload before the timed window starts.
+  //    Previously the first POST in the loop paid full TCP+TLS connection
+  //    setup cost *inside* the measured duration, undercounting speed for
+  //    the first several hundred ms of every run.
+  //
+  // 4. NO RESPONSE WAIT: previously `await fetch()` waited for the full
+  //    response, including the server building a JSON body with byte
+  //    counts and elapsed-time math. That server-side compute time was
+  //    being counted as upload time. Now we drain the response into
+  //    `.blob()` only enough to free the connection, but the upload route
+  //    itself returns an empty 204 (see route.ts change) so there is
+  //    nothing to wait on beyond the request body finishing transmission.
+
+  const DURATION  = 8_000;
+  const STREAMS   = 6;
+  const PAYLOAD   = 8 * 1024 * 1024; // 8 MB — large enough to amortize overhead
+  const WARMUP_MS = 400;             // discarded priming window before timing starts
 
   const buf = new Uint8Array(PAYLOAD);
   for (let i = 0; i < PAYLOAD; i++) buf[i] = i & 0xff;
   const blob = new Blob([buf]);
+
+  // Warm-up: one discarded upload per intended stream to establish
+  // TCP+TLS+HTTP/2 connections before the timed window begins.
+  const warmupT0 = performance.now();
+  await Promise.allSettled(
+    Array.from({ length: STREAMS }, async (_, idx) => {
+      try {
+        await fetch(`/api/speed-test/upload?warmup=${idx}`, {
+          method: "POST",
+          body: blob.slice(0, 256 * 1024), // small warm-up chunk, not full payload
+          signal,
+          cache: "no-store",
+        });
+      } catch { /* ignore warm-up failures */ }
+    })
+  );
+  // Ensure warm-up takes at least WARMUP_MS so slow-starting connections
+  // (TLS handshake on cold sockets) finish before timing begins.
+  const warmupElapsed = performance.now() - warmupT0;
+  if (warmupElapsed < WARMUP_MS && !signal.aborted) {
+    await sleep(WARMUP_MS - warmupElapsed);
+  }
 
   let totalBytes = 0;
   const t0 = performance.now();
@@ -197,12 +246,16 @@ async function measureUpload(
     while (performance.now() - t0 < DURATION) {
       if (signal.aborted) return;
       try {
-        await fetch("/api/speed-test/upload?_=" + Math.random(), {
+        const res = await fetch("/api/speed-test/upload?_=" + Math.random(), {
           method: "POST",
           body: blob,
           signal,
           cache: "no-store",
         });
+        // Drain the body (should be empty/204) without parsing JSON —
+        // avoids any server-side compute time leaking into the measurement.
+        await res.body?.cancel().catch(() => {});
+
         totalBytes += PAYLOAD;
         windowBytes += PAYLOAD;
         const now = performance.now();
@@ -214,7 +267,7 @@ async function measureUpload(
         }
       } catch (e) {
         if (signal.aborted) return;
-        await sleep(300);
+        await sleep(150);
       }
     }
   };
