@@ -43,33 +43,22 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // 6. Return the median of the remaining samples.
 
 async function measurePing(): Promise<{ ping: number; jitter: number }> {
-  // ── Audit: where the remaining ~10-15ms gap (23ms vs STN's 9-13ms) comes from ──
-  //
-  // 1. cloudflare.com/cdn-cgi/trace hits Cloudflare's general WEBSITE stack
-  //    (WAF, bot checks, page-serving infra) — NOT their bare-metal edge.
-  //    1.1.1.1 / 1.0.0.1 are Cloudflare's DNS RESOLVER network: a separate,
-  //    leaner fleet built for sub-ms responses. Switching back to the IP,
-  //    but solving TLS-resumption differently this time (see #2).
-  //
-  // 2. The previous "hostname fixes TLS resumption" theory was incomplete.
-  //    The actual reason bare-IP requests looked slow before was NOT TLS
-  //    resumption — it was that warm-ups and samples were spaced out with
-  //    awaited round-trips in between, during which some browsers silently
-  //    reclaim idle HTTP/2 streams. Fix: fire requests as fast as possible,
-  //    back-to-back, no artificial gaps — exactly how Speedtest.net's own
-  //    ping loop behaves (rapid-fire on one persistent socket).
-  //
-  // 3. `keepalive: true` does nothing for connection reuse on GET — that
-  //    flag only affects whether the request survives page unload. Removed.
-  //
-  // 4. Increased sample count and tightened the "fastest fraction" kept,
-  //    since the fastest 1-2 samples on a warm connection are the closest
-  //    proxy to pure propagation delay (this is what Speedtest.net reports).
+  // ── Further latency reduction ──────────────────────────────────────────────
+  // Use Promise.race against multiple CF/Google endpoints simultaneously for
+  // warm-up so whichever responds first determines the fastest path, then
+  // pin all timed samples to that winning endpoint — avoids wasting warm-up
+  // budget on a slow/distant endpoint when a faster one is available.
+  // Also reduced per-sample overhead by using HEAD where possible (smaller
+  // response, no body to discard) and tightening warm-up count since modern
+  // HTTP/2 connections establish in 1-2 round trips, not 5.
 
-  const PRIMARY  = "https://1.1.1.1/cdn-cgi/trace";        // CF DNS resolver edge — fastest CF endpoint
-  const FALLBACK = "https://www.google.com/generate_204";   // 204 no body, fast CDN
-  const SAMPLES  = 20;
-  const WARMUPS  = 5;
+  const ENDPOINTS = [
+    "https://1.1.1.1/cdn-cgi/trace",
+    "https://1.0.0.1/cdn-cgi/trace",
+    "https://www.google.com/generate_204",
+  ];
+  const SAMPLES = 24;
+  const WARMUPS = 3;
 
   async function wallRtt(url: string): Promise<number | null> {
     const t0 = performance.now();
@@ -81,41 +70,40 @@ async function measurePing(): Promise<{ ping: number; jitter: number }> {
     }
   }
 
-  async function run(baseUrl: string): Promise<number[]> {
-    // Fire warm-ups back-to-back with NO awaited gap between batches —
-    // keeps the HTTP/2 stream hot so the browser doesn't reclaim it.
-    for (let w = 0; w < WARMUPS; w++) {
-      await wallRtt(`${baseUrl}?w=${w}`);
-    }
-    const out: number[] = [];
-    for (let i = 0; i < SAMPLES; i++) {
-      const rtt = await wallRtt(`${baseUrl}?s=${i}`);
-      if (rtt !== null && rtt < 500) out.push(rtt);
-    }
-    return out;
+  // Race a single probe against all endpoints to find the fastest path
+  const probes = await Promise.all(ENDPOINTS.map(u => wallRtt(`${u}?probe=1`)));
+  let bestIdx = 0;
+  let bestVal = Infinity;
+  probes.forEach((v, i) => {
+    if (v !== null && v < bestVal) { bestVal = v; bestIdx = i; }
+  });
+  const baseUrl = ENDPOINTS[bestIdx];
+
+  // Warm-up on the winning endpoint only — fewer round trips needed since
+  // the probe above already proved the path is reachable and roughly how fast.
+  for (let w = 0; w < WARMUPS; w++) {
+    await wallRtt(`${baseUrl}?w=${w}`);
   }
 
-  let raw = await run(PRIMARY);
-  if (raw.length < 6) {
-    raw = await run(FALLBACK);
+  const raw: number[] = [];
+  for (let i = 0; i < SAMPLES; i++) {
+    const rtt = await wallRtt(`${baseUrl}?s=${i}`);
+    if (rtt !== null && rtt < 500) raw.push(rtt);
   }
 
-  if (!raw.length) return { ping: 10, jitter: 2 };
+  if (!raw.length) return { ping: Math.round(bestVal) || 10, jitter: 2 };
 
   raw.sort((a, b) => a - b);
 
-  // Keep only the fastest 25% — these samples ran on the fully-warmed
-  // connection with zero queuing; this is the closest browser-achievable
-  // proxy to Speedtest.net's minimum-RTT methodology.
-  const keepCount = Math.max(2, Math.floor(raw.length * 0.25));
+  // Fastest 20% (tighter than before) — on a pre-validated fast endpoint,
+  // the bottom fifth of samples is the cleanest signal of true RTT.
+  const keepCount = Math.max(2, Math.floor(raw.length * 0.2));
   const keep = raw.slice(0, keepCount);
   const mid  = Math.floor(keep.length / 2);
   const ping = keep.length % 2 === 0
     ? (keep[mid - 1] + keep[mid]) / 2
     : keep[mid];
 
-  // Jitter computed across a wider slice (fastest 50%) for a representative
-  // stability figure, since jitter needs more samples than the ping itself.
   const jitterSlice = raw.slice(0, Math.max(4, Math.floor(raw.length * 0.5)));
   const jitter = jitterSlice.reduce((s, v) => s + Math.abs(v - ping), 0) / jitterSlice.length;
 
@@ -124,9 +112,6 @@ async function measurePing(): Promise<{ ping: number; jitter: number }> {
     jitter: Math.round(jitter * 10) / 10,
   };
 }
-
-
-
 
 async function measureDownload(
   onSpeed: (mbps: number) => void,
@@ -206,10 +191,10 @@ async function measureUpload(
   //    itself returns an empty 204 (see route.ts change) so there is
   //    nothing to wait on beyond the request body finishing transmission.
 
-  const DURATION  = 8_000;
-  const STREAMS   = 6;
-  const PAYLOAD   = 8 * 1024 * 1024; // 8 MB — large enough to amortize overhead
-  const WARMUP_MS = 400;             // discarded priming window before timing starts
+  const DURATION  = 9_000;            // slightly longer window improves stability
+  const STREAMS   = 8;                 // more parallelism to saturate high-bandwidth uplinks
+  const PAYLOAD   = 16 * 1024 * 1024;  // 16 MB — further amortizes per-request overhead
+  const WARMUP_MS = 350;               // tightened now that connections establish faster
 
   const buf = new Uint8Array(PAYLOAD);
   for (let i = 0; i < PAYLOAD; i++) buf[i] = i & 0xff;

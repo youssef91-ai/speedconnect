@@ -148,6 +148,12 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
 
       needleRef.current?.setAttribute("x2", tx.toFixed(3));
       needleRef.current?.setAttribute("y2", ty.toFixed(3));
+      // Keep glow and specular highlight in sync with needle
+      const glowEl = document.getElementById("needle-glow") as SVGLineElement | null;
+      const hlEl   = document.getElementById("needle-highlight") as SVGLineElement | null;
+      const txs = tx.toFixed(3), tys = ty.toFixed(3);
+      glowEl?.setAttribute("x2", txs); glowEl?.setAttribute("y2", tys);
+      hlEl?.setAttribute("x2", txs);   hlEl?.setAttribute("y2", tys);
 
       // Arc ends exactly at the animated needle tip
       const path = arcPath(R, SA, angleDeg);
@@ -249,6 +255,15 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
             <feDropShadow dx="0" dy="0" stdDeviation="8" floodColor="rgba(0,0,0,0.6)" />
           </filter>
 
+          <linearGradient id="needleGrad" gradientUnits="userSpaceOnUse"
+            x1={CX} y1={CY} x2={initTx} y2={initTy}
+          >
+            <stop offset="0%"   stopColor="rgba(160,175,210,0.40)" />
+            <stop offset="18%"  stopColor="rgba(220,228,248,0.88)" />
+            <stop offset="55%"  stopColor="rgba(255,255,255,0.96)" />
+            <stop offset="85%"  stopColor="rgba(210,220,245,0.85)" />
+            <stop offset="100%" stopColor="rgba(180,195,230,0.60)" />
+          </linearGradient>
           <radialGradient id="hubGrad" cx="38%" cy="35%" r="65%">
             <stop offset="0%"   stopColor="rgba(255,255,255,0.88)" />
             <stop offset="45%"  stopColor="rgba(180,200,255,0.42)" />
@@ -336,36 +351,60 @@ export function SpeedGauge({ speed, phase }: SpeedGaugeProps) {
           strokeWidth={AW} strokeLinecap="butt"
         />
 
-        {/* 8. Needle */}
+        {/* 8. Premium needle — tapered metallic body, sharp tip, soft glow */}
+        {/* Needle group — x2/y2 on <line> is updated by RAF for animation */}
+        {/* Outer glow layer — wider, very faint */}
+        <line
+          x1={CX} y1={CY}
+          x2={initTx} y2={initTy}
+          stroke="rgba(200,220,255,0.10)"
+          strokeWidth="8" strokeLinecap="round"
+          ref={undefined}
+          style={{ filter: "blur(3px)" }}
+          id="needle-glow"
+        />
+        {/* Main needle body with metallic gradient */}
         <line
           ref={needleRef}
           x1={CX} y1={CY}
           x2={initTx} y2={initTy}
-          stroke="rgba(255,255,255,0.95)"
-          strokeWidth="3.0" strokeLinecap="round"
-          style={{ filter: "drop-shadow(0 2px 5px rgba(0,0,0,0.75))" }}
+          stroke="url(#needleGrad)"
+          strokeWidth="2.2" strokeLinecap="round"
+          style={{ filter: "drop-shadow(0 1px 6px rgba(0,0,0,0.85))" }}
+        />
+        {/* Specular highlight — thin bright line along needle centre */}
+        <line
+          x1={CX} y1={CY}
+          x2={initTx} y2={initTy}
+          stroke="rgba(255,255,255,0.55)"
+          strokeWidth="0.7" strokeLinecap="round"
+          id="needle-highlight"
         />
 
-        {/* 9. Tip dot */}
+        {/* 9. Sharp tip accent */}
         <circle
           ref={tipRef}
-          cx={initTx} cy={initTy} r="5"
-          fill="rgba(255,255,255,0.92)"
+          cx={initTx} cy={initTy} r="2.5"
+          fill="rgba(255,255,255,0.98)"
           filter="url(#tipGlow)"
           opacity="0"
         />
 
-        {/* 10. Hub */}
-        <circle cx={CX} cy={CY} r={HUB_R + 4}
-          fill="rgba(0,0,0,0.45)"
-          style={{ filter: "blur(3px)" }}
+        {/* 10. Hub — compact metallic disc */}
+        <circle cx={CX} cy={CY} r={HUB_R + 3}
+          fill="rgba(0,0,0,0.55)"
+          style={{ filter: "blur(4px)" }}
         />
-        <circle cx={CX} cy={CY} r={HUB_R + 2}
-          fill="#080b1a"
-          stroke="rgba(255,255,255,0.15)" strokeWidth="1.2"
+        <circle cx={CX} cy={CY} r={HUB_R + 1.5}
+          fill="#0d1020"
+          stroke="rgba(255,255,255,0.22)" strokeWidth="1"
         />
-        <circle cx={CX} cy={CY} r={HUB_R}
+        <circle cx={CX} cy={CY} r={HUB_R - 0.5}
           fill="url(#hubGrad)"
+        />
+        {/* Hub inner glint */}
+        <circle cx={CX - HUB_R * 0.28} cy={CY - HUB_R * 0.28} r={HUB_R * 0.32}
+          fill="rgba(255,255,255,0.25)"
         />
 
         {/* 11. Unit label */}
