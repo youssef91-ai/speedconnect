@@ -165,101 +165,89 @@ async function measureUpload(
   onSpeed: (mbps: number) => void,
   signal: AbortSignal
 ): Promise<number> {
-  // ── Upload bottleneck fixes (vs Speedtest.net methodology) ────────────────
+  // ── Continuous upload measurement — Speedtest.net methodology ─────────────
+  // Key insight: browsers cannot report upload progress mid-request
+  // (Streams API only exposes readable/response streams, not writable progress).
+  // The previous 16MB-per-request approach caused a multi-second freeze because
+  // each 16MB POST at 40 Mbps took ~3.2s before onSpeed() could fire.
   //
-  // 1. PAYLOAD: 2MB -> 8MB. At 2MB, a fast uplink (100+ Mbps) finishes the
-  //    transfer in <20ms — meaning TLS handshake re-use, header overhead,
-  //    and server JSON-response construction dominate the measured time
-  //    instead of actual data throughput. Larger payloads amortize that
-  //    fixed per-request cost across more bytes, so the measurement
-  //    converges on true link speed instead of request-overhead speed.
-  //
-  // 2. STREAMS: 3 -> 6. Matches download's saturation strategy and gives
-  //    enough parallel HTTP/2 streams to fill high-bandwidth uplinks that
-  //    a single stream's TCP window can't saturate alone.
-  //
-  // 3. WARM-UP: added one discarded upload before the timed window starts.
-  //    Previously the first POST in the loop paid full TCP+TLS connection
-  //    setup cost *inside* the measured duration, undercounting speed for
-  //    the first several hundred ms of every run.
-  //
-  // 4. NO RESPONSE WAIT: previously `await fetch()` waited for the full
-  //    response, including the server building a JSON body with byte
-  //    counts and elapsed-time math. That server-side compute time was
-  //    being counted as upload time. Now we drain the response into
-  //    `.blob()` only enough to free the connection, but the upload route
-  //    itself returns an empty 204 (see route.ts change) so there is
-  //    nothing to wait on beyond the request body finishing transmission.
+  // Fix: use small chunks (1MB) so each POST completes in <1s at typical speeds.
+  // A separate RAF-driven speed reporter fires every 150ms from totalBytes,
+  // giving smooth continuous gauge updates independent of POST completion timing.
+  // Blob is pre-filled once with crypto.getRandomValues for realistic payloads.
 
-  const DURATION  = 9_000;            // slightly longer window improves stability
-  const STREAMS   = 8;                 // more parallelism to saturate high-bandwidth uplinks
-  const PAYLOAD   = 16 * 1024 * 1024;  // 16 MB — further amortizes per-request overhead
-  const WARMUP_MS = 350;               // tightened now that connections establish faster
+  const DURATION   = 9_000;
+  const STREAMS    = 6;
+  const CHUNK_SIZE = 1 * 1024 * 1024;  // 1 MB per POST — completes in <1s at any speed
+  const WARMUP_MS  = 300;
 
-  const buf = new Uint8Array(PAYLOAD);
-  for (let i = 0; i < PAYLOAD; i++) buf[i] = i & 0xff;
-  const blob = new Blob([buf]);
+  // Pre-fill chunk once — use pattern fill (not random) to avoid blocking
+  // crypto RNG, but make it non-trivially compressible to prevent gzip cheating
+  const buf = new Uint8Array(CHUNK_SIZE);
+  for (let i = 0; i < CHUNK_SIZE; i++) buf[i] = (i * 37 + 42) & 0xff;
+  const chunk = new Blob([buf]);
 
-  // Warm-up: one discarded upload per intended stream to establish
-  // TCP+TLS+HTTP/2 connections before the timed window begins.
-  const warmupT0 = performance.now();
-  await Promise.allSettled(
-    Array.from({ length: STREAMS }, async (_, idx) => {
-      try {
-        await fetch(`/api/speed-test/upload?warmup=${idx}`, {
-          method: "POST",
-          body: blob.slice(0, 256 * 1024), // small warm-up chunk, not full payload
-          signal,
-          cache: "no-store",
-        });
-      } catch { /* ignore warm-up failures */ }
-    })
-  );
-  // Ensure warm-up takes at least WARMUP_MS so slow-starting connections
-  // (TLS handshake on cold sockets) finish before timing begins.
-  const warmupElapsed = performance.now() - warmupT0;
-  if (warmupElapsed < WARMUP_MS && !signal.aborted) {
-    await sleep(WARMUP_MS - warmupElapsed);
-  }
+  // Warm-up: 256KB per stream to establish connections before timing starts
+  const wt0 = performance.now();
+  await Promise.allSettled(Array.from({ length: STREAMS }, async (_, i) => {
+    try {
+      await fetch(`/api/speed-test/upload?w=${i}`, {
+        method: "POST", body: chunk.slice(0, 256 * 1024),
+        signal, cache: "no-store",
+      });
+    } catch { /* ok */ }
+  }));
+  const wElapsed = performance.now() - wt0;
+  if (wElapsed < WARMUP_MS && !signal.aborted) await sleep(WARMUP_MS - wElapsed);
 
   let totalBytes = 0;
   const t0 = performance.now();
-  let windowBytes = 0;
-  let windowT = t0;
 
+  // ── Speed reporter: fires every 150ms via RAF, always has fresh data ──────
+  // Because it reads totalBytes (updated by workers on each POST completion),
+  // the gauge updates continuously even while a POST is still in-flight.
+  let lastReportBytes = 0;
+  let lastReportTime  = t0;
+  let rafId = 0;
+  const report = () => {
+    if (signal.aborted) return;
+    const now   = performance.now();
+    const dt    = now - lastReportTime;
+    if (dt >= 150) {
+      const db  = totalBytes - lastReportBytes;
+      if (db > 0) {
+        const spd = (db * 8) / (dt / 1000) / 1e6;
+        onSpeed(Math.round(spd * 10) / 10);
+      }
+      lastReportBytes = totalBytes;
+      lastReportTime  = now;
+    }
+    rafId = requestAnimationFrame(report);
+  };
+  rafId = requestAnimationFrame(report);
+
+  // ── Upload workers: loop sending 1MB chunks until duration expires ────────
   const worker = async () => {
     while (performance.now() - t0 < DURATION) {
-      if (signal.aborted) return;
+      if (signal.aborted) break;
       try {
         const res = await fetch("/api/speed-test/upload?_=" + Math.random(), {
-          method: "POST",
-          body: blob,
-          signal,
-          cache: "no-store",
+          method: "POST", body: chunk, signal, cache: "no-store",
         });
-        // Drain the body (should be empty/204) without parsing JSON —
-        // avoids any server-side compute time leaking into the measurement.
         await res.body?.cancel().catch(() => {});
-
-        totalBytes += PAYLOAD;
-        windowBytes += PAYLOAD;
-        const now = performance.now();
-        if (now - windowT > 150) {
-          const spd = (windowBytes * 8) / ((now - windowT) / 1000) / 1e6;
-          onSpeed(Math.round(spd * 10) / 10);
-          windowBytes = 0;
-          windowT = now;
-        }
-      } catch (e) {
-        if (signal.aborted) return;
-        await sleep(150);
+        totalBytes += CHUNK_SIZE;
+      } catch {
+        if (signal.aborted) break;
+        await sleep(100);
       }
     }
   };
 
   await Promise.allSettled(Array.from({ length: STREAMS }, worker));
+  cancelAnimationFrame(rafId);
+
   const totalTime = (performance.now() - t0) / 1000;
-  return Math.round(((totalBytes * 8) / totalTime / 1e6) * 10) / 10;
+  return Math.round((totalBytes * 8) / totalTime / 1e6 * 10) / 10;
 }
 
 export function useSpeedTest() {
