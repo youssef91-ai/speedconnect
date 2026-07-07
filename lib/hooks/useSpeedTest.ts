@@ -207,23 +207,30 @@ async function measureUpload(
   const wElapsed = performance.now() - wt0;
   if (wElapsed < WARMUP_MS && !signal.aborted) await sleep(WARMUP_MS - wElapsed);
 
-  let enqueuedBytes = 0;   // bytes pushed into streams (write-side throughput)
-  let confirmedBytes = 0;  // bytes from completed POSTs (conservative fallback)
+  let enqueuedBytes = 0;   // bytes pushed into stream controller (write-side)
   const t0 = performance.now();
 
   // ── RAF speed reporter: fires every 150ms off enqueued bytes ─────────────
-  let lastBytes = 0;
-  let lastT     = t0;
-  let rafId     = 0;
+  // Also records a rolling history of speed samples so the final result
+  // can use the same values already shown on the gauge (no spike).
+  let lastBytes  = 0;
+  let lastT      = t0;
+  let rafId      = 0;
+  const speedHistory: number[] = [];  // samples from the live display
+
   const report = () => {
     if (signal.aborted) return;
     const now = performance.now();
     const dt  = now - lastT;
     if (dt >= 150) {
-      const db  = enqueuedBytes - lastBytes;
+      const db = enqueuedBytes - lastBytes;
       if (db > 0) {
         const spd = (db * 8) / (dt / 1000) / 1e6;
-        onSpeed(Math.round(spd * 10) / 10);
+        const rounded = Math.round(spd * 10) / 10;
+        onSpeed(rounded);
+        speedHistory.push(rounded);
+        // Keep only the last 20 samples (~3s of history) for final calc
+        if (speedHistory.length > 20) speedHistory.shift();
       }
       lastBytes = enqueuedBytes;
       lastT     = now;
@@ -272,11 +279,22 @@ async function measureUpload(
   await Promise.allSettled(Array.from({ length: STREAMS }, worker));
   cancelAnimationFrame(rafId);
 
+  // Final result: median of the last 10 live speed samples.
+  // This uses the EXACT same sliding-window values already shown on the gauge,
+  // so the final number cannot spike — it will match the last stable reading.
+  // Fallback to total-bytes formula only if we have no history (very short run).
+  if (speedHistory.length >= 3) {
+    const recent = speedHistory.slice(-10);
+    recent.sort((a, b) => a - b);
+    const mid = Math.floor(recent.length / 2);
+    const median = recent.length % 2 === 0
+      ? (recent[mid - 1] + recent[mid]) / 2
+      : recent[mid];
+    return Math.round(median * 10) / 10;
+  }
+  // Fallback: total bytes / total time (less accurate but safe)
   const totalTime = (performance.now() - t0) / 1000;
-  // Use enqueued bytes as the primary measure (true write throughput);
-  // confirmed bytes as sanity floor in case stream API wasn't supported
-  const measured = Math.max(enqueuedBytes, confirmedBytes);
-  return Math.round((measured * 8) / totalTime / 1e6 * 10) / 10;
+  return Math.round((enqueuedBytes * 8) / totalTime / 1e6 * 10) / 10;
 }
 
 
