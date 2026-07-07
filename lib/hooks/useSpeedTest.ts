@@ -270,7 +270,6 @@ async function measureUpload(
         duplex: "half",
       } as RequestInit);
       await res.body?.cancel().catch(() => {});
-      confirmedBytes += enqueuedBytes; // rough accounting for fallback
     } catch {
       /* stream closed by us or aborted — expected at end of duration */
     }
