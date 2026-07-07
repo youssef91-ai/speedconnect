@@ -1,5 +1,5 @@
 import { MetadataRoute } from "next";
-import { blogPosts } from "@/lib/blog-data";
+import { getAllPosts } from "@/lib/blog";
 
 const BASE = "https://speedconnect.ai";
 
@@ -17,7 +17,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${BASE}/tools/ip-lookup`, changeFrequency: "weekly" as const, priority: 0.6 },
   ];
 
-  const blog_routes = blogPosts.map((post) => ({
+  const blog_routes = getAllPosts().map((post) => ({
     url: `${BASE}/blog/${post.slug}`,
     changeFrequency: "monthly" as const,
     priority: 0.7,

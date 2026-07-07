@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageShell } from "@/components/PageShell";
-import { blogPosts, categories } from "@/lib/blog-data";
+import { getAllPosts, getCategories } from "@/lib/blog";
+
+const blogPosts = getAllPosts();
+const categories = getCategories();
 
 export const metadata: Metadata = {
   title: "Blog — SpeedConnect.ai",
