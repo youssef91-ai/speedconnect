@@ -1,22 +1,21 @@
 export const runtime = "edge";
 
-// ── Minimal upload sink ──────────────────────────────────────────────────────
-// Previous version parsed the body, counted bytes, computed elapsed time,
-// and returned a JSON payload with those stats. All of that server-side
-// compute happened *after* the client's upload finished transmitting but
-// *before* the client's fetch() promise resolved — meaning JSON construction
-// time was being counted as part of the measured upload duration.
-//
-// Speedtest.net's upload endpoint does the same thing this does: accept
-// bytes, respond as fast as possible with no payload. The client times its
-// own write throughput; the server doesn't need to report anything back.
 export async function POST(request: Request) {
-  // Drain the body so the connection is properly released, but discard
-  // it immediately — no byte counting, no JSON construction.
+  // Drain the full request body so the browser's ReadableStream gets proper
+  // backpressure and the connection closes cleanly when the stream ends.
+  // request.body?.cancel() causes a mid-stream RST which can abort the fetch.
   try {
-    await request.body?.cancel();
+    if (request.body) {
+      const reader = request.body.getReader();
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+        // discard chunk — we only care about draining
+      }
+    }
   } catch {
-    // ignore — body may already be consumed by the edge runtime
+    // client closed stream — normal at end of timed upload
   }
 
   return new Response(null, {

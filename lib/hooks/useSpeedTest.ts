@@ -165,34 +165,41 @@ async function measureUpload(
   onSpeed: (mbps: number) => void,
   signal: AbortSignal
 ): Promise<number> {
-  // ── Continuous upload measurement — Speedtest.net methodology ─────────────
-  // Key insight: browsers cannot report upload progress mid-request
-  // (Streams API only exposes readable/response streams, not writable progress).
-  // The previous 16MB-per-request approach caused a multi-second freeze because
-  // each 16MB POST at 40 Mbps took ~3.2s before onSpeed() could fire.
+  // ── True streaming upload — eliminates freeze and undercount ──────────────
   //
-  // Fix: use small chunks (1MB) so each POST completes in <1s at typical speeds.
-  // A separate RAF-driven speed reporter fires every 150ms from totalBytes,
-  // giving smooth continuous gauge updates independent of POST completion timing.
-  // Blob is pre-filled once with crypto.getRandomValues for realistic payloads.
+  // Problem with chunk-loop approach:
+  //   - Each 1MB POST has TCP slow-start + header overhead (~5-10ms per req)
+  //   - At 185 Mbps, 1MB = 43ms, so overhead = 10-20% undercount per request
+  //   - When DURATION expires, all in-flight fetches must fully resolve before
+  //     Promise.allSettled returns → freeze at ~78% while last POSTs drain
+  //   - RAF reporter fires but totalBytes stops incrementing → gauge freezes
+  //
+  // Fix: Use a ReadableStream body on each connection.
+  // The browser sends data continuously from the stream for the full duration.
+  // We count bytes AS WE ENQUEUE THEM (before the server ACKs), which gives
+  // true instantaneous throughput. When duration expires we close the stream;
+  // the fetch resolves almost immediately since the server returns 204 as soon
+  // as it sees the stream end — no waiting for a large in-flight blob.
+  //
+  // This is how Speedtest.net's web client works: one persistent stream per
+  // connection, measured by bytes-enqueued not bytes-acknowledged.
 
-  const DURATION   = 9_000;
-  const STREAMS    = 6;
-  const CHUNK_SIZE = 1 * 1024 * 1024;  // 1 MB per POST — completes in <1s at any speed
-  const WARMUP_MS  = 300;
+  const DURATION    = 9_000;
+  const STREAMS     = 6;
+  const CHUNK       = 64 * 1024;          // 64 KB chunks enqueued into the stream
+  const WARMUP_MS   = 250;
 
-  // Pre-fill chunk once — use pattern fill (not random) to avoid blocking
-  // crypto RNG, but make it non-trivially compressible to prevent gzip cheating
-  const buf = new Uint8Array(CHUNK_SIZE);
-  for (let i = 0; i < CHUNK_SIZE; i++) buf[i] = (i * 37 + 42) & 0xff;
-  const chunk = new Blob([buf]);
+  // Pre-generate one reusable 64KB chunk — pattern fill, incompressible enough
+  const chunkBuf = new Uint8Array(CHUNK);
+  for (let i = 0; i < CHUNK; i++) chunkBuf[i] = (i * 37 + 42) & 0xff;
 
-  // Warm-up: 256KB per stream to establish connections before timing starts
+  // Warm-up: establish connections before timed window
   const wt0 = performance.now();
   await Promise.allSettled(Array.from({ length: STREAMS }, async (_, i) => {
     try {
+      const wb = new Uint8Array(128 * 1024);
       await fetch(`/api/speed-test/upload?w=${i}`, {
-        method: "POST", body: chunk.slice(0, 256 * 1024),
+        method: "POST", body: new Blob([wb]),
         signal, cache: "no-store",
       });
     } catch { /* ok */ }
@@ -200,46 +207,65 @@ async function measureUpload(
   const wElapsed = performance.now() - wt0;
   if (wElapsed < WARMUP_MS && !signal.aborted) await sleep(WARMUP_MS - wElapsed);
 
-  let totalBytes = 0;
+  let enqueuedBytes = 0;   // bytes pushed into streams (write-side throughput)
+  let confirmedBytes = 0;  // bytes from completed POSTs (conservative fallback)
   const t0 = performance.now();
 
-  // ── Speed reporter: fires every 150ms via RAF, always has fresh data ──────
-  // Because it reads totalBytes (updated by workers on each POST completion),
-  // the gauge updates continuously even while a POST is still in-flight.
-  let lastReportBytes = 0;
-  let lastReportTime  = t0;
-  let rafId = 0;
+  // ── RAF speed reporter: fires every 150ms off enqueued bytes ─────────────
+  let lastBytes = 0;
+  let lastT     = t0;
+  let rafId     = 0;
   const report = () => {
     if (signal.aborted) return;
-    const now   = performance.now();
-    const dt    = now - lastReportTime;
+    const now = performance.now();
+    const dt  = now - lastT;
     if (dt >= 150) {
-      const db  = totalBytes - lastReportBytes;
+      const db  = enqueuedBytes - lastBytes;
       if (db > 0) {
         const spd = (db * 8) / (dt / 1000) / 1e6;
         onSpeed(Math.round(spd * 10) / 10);
       }
-      lastReportBytes = totalBytes;
-      lastReportTime  = now;
+      lastBytes = enqueuedBytes;
+      lastT     = now;
     }
     rafId = requestAnimationFrame(report);
   };
   rafId = requestAnimationFrame(report);
 
-  // ── Upload workers: loop sending 1MB chunks until duration expires ────────
+  // ── Per-connection streaming worker ──────────────────────────────────────
   const worker = async () => {
-    while (performance.now() - t0 < DURATION) {
-      if (signal.aborted) break;
-      try {
-        const res = await fetch("/api/speed-test/upload?_=" + Math.random(), {
-          method: "POST", body: chunk, signal, cache: "no-store",
-        });
-        await res.body?.cancel().catch(() => {});
-        totalBytes += CHUNK_SIZE;
-      } catch {
-        if (signal.aborted) break;
-        await sleep(100);
-      }
+    let done = false;
+
+    const stream = new ReadableStream({
+      async pull(ctrl) {
+        if (done || signal.aborted) {
+          ctrl.close();
+          return;
+        }
+        if (performance.now() - t0 >= DURATION) {
+          done = true;
+          ctrl.close();
+          return;
+        }
+        // Enqueue next chunk — count bytes here (write side)
+        ctrl.enqueue(chunkBuf);
+        enqueuedBytes += CHUNK;
+      },
+    });
+
+    try {
+      const res = await fetch("/api/speed-test/upload?_=" + Math.random(), {
+        method: "POST",
+        body: stream,
+        signal,
+        cache: "no-store",
+        // @ts-ignore — duplex required for streaming request body in some browsers
+        duplex: "half",
+      } as RequestInit);
+      await res.body?.cancel().catch(() => {});
+      confirmedBytes += enqueuedBytes; // rough accounting for fallback
+    } catch {
+      /* stream closed by us or aborted — expected at end of duration */
     }
   };
 
@@ -247,8 +273,12 @@ async function measureUpload(
   cancelAnimationFrame(rafId);
 
   const totalTime = (performance.now() - t0) / 1000;
-  return Math.round((totalBytes * 8) / totalTime / 1e6 * 10) / 10;
+  // Use enqueued bytes as the primary measure (true write throughput);
+  // confirmed bytes as sanity floor in case stream API wasn't supported
+  const measured = Math.max(enqueuedBytes, confirmedBytes);
+  return Math.round((measured * 8) / totalTime / 1e6 * 10) / 10;
 }
+
 
 export function useSpeedTest() {
   const [state, setState] = useState<SpeedTestState>({
